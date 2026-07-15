@@ -118,10 +118,21 @@ enum DetailSelection: Equatable {
         case .historyEntry, .startFlow: return true
         }
     }
+
+    /// Portrait sheet initial height. nil = full screen. [.medium, .large] = half-screen start, draggable to full.
+    /// Use medium for browseable lists; use nil for interactive/transactional views.
+    var sheetDetents: Set<PresentationDetent>? {
+        switch self {
+        case .catalog, .methodsDetail: return [.medium, .large]
+        default: return nil
+        }
+    }
 }
 ```
 
 The `.none` case is special — selecting it dismisses whatever is currently shown.
+
+**`sheetDetents` rule:** Content-heavy list views → `[.medium, .large]` (nav bar stays pinned when scrolling). Interactive views (forms, card-draw, rituals) → `nil` (full screen). Landscape sidebar ignores detents entirely.
 
 ### Option 3: ContentView (Sheet Orchestrator)
 
@@ -613,12 +624,13 @@ SidebarButton(selection: $detailSelection, target: .myNewPage) {
 3. Does the child view have its own `NavigationStack`?
    - **Yes** → Render directly, pass `context.showCloseButton` + onClose
    - **No** → Wrap with `morePane(context: context) { }`
-4. Change trigger from `NavigationLink` to `Button { detailSelection = .yourCase }` (or use `SidebarButton`)
-5. If the view used `@Binding var isPresented`, change to `var onDismiss: () -> Void`
-6. **Always** guard toolbar close buttons with `if context.showCloseButton { }`
-7. **Test at narrow width** — sidebar is ~360pt. Fixed-width rows overflow. Use `LazyVGrid`/`.frame(maxWidth: .infinity)`.
-8. Build, test both orientations, verify close button only appears in landscape
-9. **No changes needed in SplitDetailPane.swift**
+4. Set `sheetDetents` — list views → `[.medium, .large]`, interactive views → `nil`
+5. Change trigger from `NavigationLink` to `Button { detailSelection = .yourCase }` (or use `SidebarButton`)
+6. If the view used `@Binding var isPresented`, change to `var onDismiss: () -> Void`
+7. **Always** guard toolbar close buttons with `if context.showCloseButton { }`
+8. **Test at narrow width** — sidebar is ~360pt. Fixed-width rows overflow. Use `LazyVGrid`/`.frame(maxWidth: .infinity)`.
+9. Build, test both orientations, verify close button only appears in landscape
+10. **No changes needed in SplitDetailPane.swift**
 
 ## Related
 
