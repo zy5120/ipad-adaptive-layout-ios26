@@ -159,10 +159,10 @@ struct ContentView: View {
 
 A single view that works in both contexts. The `showCloseButton` flag controls behavior:
 
-- **Landscape (showCloseButton: true):** Renders inline. Shows a floating close button that resets `selection = .none`.
+- **Landscape (showCloseButton: true):** Renders inline. Shows a toolbar xmark button that resets `selection = .none`.
 - **Portrait (showCloseButton: false):** Renders inside a `.sheet`. Close button is hidden (system swipe-dismiss handles it).
 
-**Critical rule — close button ownership:** The close button MUST be owned by `SplitDetailPane`, applied as an overlay wrapper around child content. Child views (CardDrawView, TarotCatalogView, etc.) must NEVER draw their own close button. This guarantees visual consistency — every sidebar view has the identical floating xmark in the same position.
+**Critical rule — close button style:** Every sidebar view uses the same **toolbar xmark** in `NavigationStack` (placement: `.cancellationAction`). Simple views use the `morePane { }` wrapper; views with existing NavigationStack (like CardDrawView) handle it inline; dark-background views add `.toolbarBackground(.hidden)`.
 
 ```swift
 struct SplitDetailPane: View {
