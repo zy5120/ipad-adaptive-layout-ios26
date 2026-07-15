@@ -15,6 +15,20 @@ description: "iPad adaptive layout using HStack + conditional pane (NOT Navigati
 
 > Replace NavigationSplitView with a predictable HStack-based adaptive layout where portrait = sheet overlay, landscape = inline sidebar — surviving rotation without state loss.
 
+## Agent Instructions — Ask Before Applying
+
+> [!IMPORTANT]
+> **When invoked, first ask the user which mode to use:**
+
+| Mode | What it does | When to pick |
+|------|-------------|--------------|
+| **A — 模板模式** | Build `DetailSelection.makeView` + thin `SplitDetailPane` once. All pages register in one place. `SplitDetailPane` never changes. | Project has 3+ sidebar pages, or you expect to add more later. |
+| **B — 逐页模式** | Each page modifies `DetailSelection` + `SplitDetailPane` separately. Standard switch-case expansion. | Only 1-2 pages need sidebar, or you're patching an existing project without refactoring. |
+
+**Ask:** *"这个 APP 大概需要几个副屏页面？多的话我用模板模式一次搭好框架，以后加页面只改一个文件。少的话逐页加就行。"*
+
+Then proceed with the chosen mode. Both modes use the same core patterns below.
+
 ## Quick Reference
 
 | Problem | Solution |
