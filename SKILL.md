@@ -576,20 +576,49 @@ LazyVGrid(
 
 **Rule of thumb:** Sidebar width ≈ `max(360, screenWidth × 0.35)`. On a 1024pt iPad landscape, that's ~360pt. Design for that minimum. Use `.frame(maxWidth: .infinity)`, `LazyVGrid`, `ScrollView(.horizontal)`, or `ViewThatFits` instead of fixed-width horizontal stacks.
 
+### Architecture: Single-File Page Registration
+
+After refactoring, all page rendering lives in `DetailSelection.makeView(context:)`. `SplitDetailPane` is a thin shell (~30 lines) that never needs modification when adding pages.
+
+**To add a new sidebar page — 3 steps in ONE file (`DetailSelection.swift`):**
+
+```swift
+// 1. Add case
+case myNewPage
+
+// 2. Add branch in makeView
+case .myNewPage:
+    morePane(context: context) { MyNewView() }
+
+// 3. needsSheet is default true (only .none and .cardDetail are false)
+```
+
+**`SplitDetailPane` never changes.** The `DetailPaneContext` struct provides:
+- `showCloseButton: Bool` — landscape/sheet mode
+- `dismiss: DismissAction` — sheet dismiss
+- `$selection: Binding<DetailSelection>` — read/write current page
+- `$reminderQuestion`, `$showQuestionInput`, `$lastEntryID`, `$customSpreadCount` — per-page state
+
+**Convenience component `SidebarButton`** for trigger sites:
+```swift
+SidebarButton(selection: $detailSelection, target: .myNewPage) {
+    Label("我的页面", systemImage: "star")
+}
+```
+
 ### Checklist: Adding a new view to the sidebar
 
-When adding a new screen that should show in the right pane:
-
-1. Add case to `DetailSelection` enum, set `needsSheet: true`
-2. Add `case .yourCase:` in `SplitDetailPane` switch
+1. Add case to `DetailSelection` enum
+2. Add `case .yourCase:` branch in `makeView(context:)` — same file
 3. Does the child view have its own `NavigationStack`?
-   - **Yes** → Render directly, pass `showCloseButton`/`onClose` params
-   - **No** → Wrap with `morePane { }`
-4. Change trigger in sidebar from `NavigationLink` to `Button { detailSelection = .yourCase }`
+   - **Yes** → Render directly, pass `context.showCloseButton` + onClose
+   - **No** → Wrap with `morePane(context: context) { }`
+4. Change trigger from `NavigationLink` to `Button { detailSelection = .yourCase }` (or use `SidebarButton`)
 5. If the view used `@Binding var isPresented`, change to `var onDismiss: () -> Void`
-6. **Always** guard toolbar close buttons with `if showCloseButton { }`
+6. **Always** guard toolbar close buttons with `if context.showCloseButton { }`
 7. **Test at narrow width** — sidebar is ~360pt. Fixed-width rows overflow. Use `LazyVGrid`/`.frame(maxWidth: .infinity)`.
 8. Build, test both orientations, verify close button only appears in landscape
+9. **No changes needed in SplitDetailPane.swift**
 
 ## Related
 
