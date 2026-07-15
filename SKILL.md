@@ -133,16 +133,20 @@ enum DetailSelection: Equatable {
         }
     }
 
-    /// Portrait sheet height. nil = native [.medium, .large] two-stage draggable.
-    var sheetDetents: Set<PresentationDetent>? {
-        return nil  // all pages get native two-stage behavior
-    }
 }
 ```
 
 The `.none` case is special — selecting it dismisses whatever is currently shown.
 
-**`sheetDetents` rule:** Default `nil` = native `[.medium, .large]` — every sheet can drag between half-screen and full-screen. Only override to `[.large]` if a page truly cannot function at half height (rare). Landscape sidebar ignores detents entirely.
+**`sheetDetents` is applied at the `ContentView` sheet level, NOT per-page:**
+```swift
+// ContentView.swift — one line covers ALL pages
+.sheet(isPresented: $showDetailSheet) {
+    SplitDetailPane(selection: $detailSelection)
+        .presentationDetents([.medium, .large])
+}
+```
+Every sheet starts at half-screen, draggable to full. Individual pages don't need to set their own detents.
 
 ### Option 3: ContentView (Sheet Orchestrator)
 
