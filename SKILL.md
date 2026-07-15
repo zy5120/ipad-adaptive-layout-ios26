@@ -415,6 +415,174 @@ struct AppRoot: View {
 }
 ```
 
+## Common Pitfalls & Fixes
+
+Issues encountered when applying this pattern to a real app, and how to fix them.
+
+### Pitfall 1: Close button appears in portrait sheets
+
+**Symptom:** Toolbar xmark is visible in portrait mode when it should be hidden (portrait should rely on system swipe-dismiss).
+
+**Cause:** Forgetting the `if showCloseButton` guard on `ToolbarItem`.
+
+**Fix:**
+```swift
+// ❌ Always shows — wrong
+.toolbar {
+    ToolbarItem(placement: .cancellationAction) {
+        Button { dismiss() } label: { Image(systemName: "xmark") }
+    }
+}
+
+// ✅ Only shows in landscape — correct
+.toolbar {
+    if showCloseButton {
+        ToolbarItem(placement: .cancellationAction) {
+            Button { onClose?() } label: { Image(systemName: "xmark") }
+        }
+    }
+}
+```
+
+### Pitfall 2: Double NavigationStack wrapping
+
+**Symptom:** View already has its own `NavigationStack` (like AIModelConfigSheet, CardDrawView). Wrapping it in `morePane { }` creates nested NavigationStacks — broken layout, double nav bars.
+
+**Cause:** `morePane` adds its own `NavigationStack`. If the child view already has one, they stack.
+
+**Fix:** For views with their own NavigationStack, render them directly in the switch and pass `showCloseButton`/`onClose` params:
+```swift
+// ❌ Double NavigationStack
+case .myView:
+    morePane { MyViewWithOwnNavStack() }
+
+// ✅ Direct render, pass params
+case .myView:
+    MyViewWithOwnNavStack(
+        showCloseButton: showCloseButton,
+        onClose: { dismiss(); selection = .none }
+    )
+```
+
+Use `morePane { }` only for views WITHOUT their own NavigationStack (simple List views, static content).
+
+### Pitfall 3: Missing `body` closing brace after switch
+
+**Symptom:** Compiler errors like "Attribute 'private' can only be used in a non-local scope" on struct members that should be at struct level.
+
+**Cause:** The switch statement's closing `}` is the last thing in `body`. If you add a closing `}` after the switch, you've actually closed `body`. But if your edit accidentally removes that `}`, all subsequent struct members are treated as local declarations inside `body`.
+
+**Fix:** After the switch's `}`, you need another `}` to close `body`:
+```swift
+var body: some View {
+    switch selection {
+    case .none: emptyPane
+    // ... cases ...
+    }        // ← closes switch
+}            // ← closes body ← DON'T FORGET THIS
+
+// Struct-level members below
+private var emptyPane: some View { ... }
+```
+
+### Pitfall 4: `@Binding var isPresented` incompatible with SplitDetailPane
+
+**Symptom:** View uses `@Binding var isPresented: Bool` for dismissal (common sheet pattern). Can't close from SplitDetailPane because there's no binding to set.
+
+**Cause:** The `isPresented` pattern works when the parent owns a `@State` and passes a `$binding`. SplitDetailPane doesn't own such state — it uses `selection = .none` to dismiss.
+
+**Fix:** Replace `@Binding var isPresented: Bool` with `var onDismiss: () -> Void`:
+```swift
+// ❌ Binding — can't close from SplitDetailPane
+struct OnboardingView: View {
+    @Binding var isPresented: Bool
+    // ... isPresented = false
+}
+
+// ✅ Callback — works from any context
+struct OnboardingView: View {
+    var onDismiss: () -> Void
+    // ... onDismiss()
+}
+```
+
+Call sites:
+```swift
+// From AdaptiveRootView (local sheet)
+OnboardingView(onDismiss: { showOnboarding = false })
+
+// From SplitDetailPane (sidebar/sheet)
+OnboardingView(onDismiss: { dismiss(); selection = .none })
+```
+
+### Pitfall 5: NavigationLink bypasses the sidebar
+
+**Symptom:** Content appears in a narrow left sidebar (35% width) instead of the right detail pane in landscape.
+
+**Cause:** `NavigationLink` pushes onto the local `NavigationStack` which lives inside `ContentView` (the left 35% panel). The pushed view never enters `SplitDetailPane`.
+
+**Fix:** Replace every `NavigationLink` with a `Button` that sets `detailSelection`:
+```swift
+// ❌ Stays in left sidebar
+NavigationLink { TarotCatalogView(...) } label: { Label("图鉴", ...) }
+
+// ✅ Routes through SplitDetailPane
+Button { detailSelection = .tarotCatalog } label: { Label("图鉴", ...) }
+```
+
+### Pitfall 6: Choosing the wrong close button style
+
+**Symptom:** Using a floating Circle+material close button overlay that looks non-native and has z-index conflicts with scroll views.
+
+**User feedback:** Prefer native toolbar xmark — looks like it belongs, zero z-index issues, consistent position across all views.
+
+**Decision:** Use `NavigationStack` + `.toolbar { ToolbarItem(placement: .cancellationAction) { xmark } }` for all close buttons. The floating overlay pattern (`closeButton` with Circle+ultraThinMaterial) is documented as an alternative but the toolbar pattern is the primary recommendation.
+
+### Pitfall 7: Fixed-width content overflows in sidebar
+
+**Symptom:** Content looks fine in portrait (full screen) but overflows or clips in landscape sidebar (35% width). Typically happens with horizontal layouts, number pickers, button rows.
+
+**Cause:** Sidebar is only ~35% of screen width (min 360pt on iPad). Fixed-width elements (`frame(width: 32)`) × N items + fixed spacing easily exceed available space.
+
+**Fix:** Always test content at narrow widths. Use responsive layouts:
+```swift
+// ❌ Fixed-width HStack — overflows in sidebar
+HStack(spacing: 12) {
+    ForEach(1...10, id: \.self) { n in
+        Text("\(n)").frame(width: 32, height: 44)
+    }
+}
+
+// ✅ LazyVGrid with flexible columns — adapts to any width
+LazyVGrid(
+    columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 5),
+    spacing: 10
+) {
+    ForEach(1...10, id: \.self) { n in
+        Text("\(n)")
+            .frame(maxWidth: .infinity)
+            .frame(height: 44)
+    }
+}
+```
+
+**Rule of thumb:** Sidebar width ≈ `max(360, screenWidth × 0.35)`. On a 1024pt iPad landscape, that's ~360pt. Design for that minimum. Use `.frame(maxWidth: .infinity)`, `LazyVGrid`, `ScrollView(.horizontal)`, or `ViewThatFits` instead of fixed-width horizontal stacks.
+
+### Checklist: Adding a new view to the sidebar
+
+When adding a new screen that should show in the right pane:
+
+1. Add case to `DetailSelection` enum, set `needsSheet: true`
+2. Add `case .yourCase:` in `SplitDetailPane` switch
+3. Does the child view have its own `NavigationStack`?
+   - **Yes** → Render directly, pass `showCloseButton`/`onClose` params
+   - **No** → Wrap with `morePane { }`
+4. Change trigger in sidebar from `NavigationLink` to `Button { detailSelection = .yourCase }`
+5. If the view used `@Binding var isPresented`, change to `var onDismiss: () -> Void`
+6. **Always** guard toolbar close buttons with `if showCloseButton { }`
+7. **Test at narrow width** — sidebar is ~360pt. Fixed-width rows overflow. Use `LazyVGrid`/`.frame(maxWidth: .infinity)`.
+8. Build, test both orientations, verify close button only appears in landscape
+
 ## Related
 
 - [Apple HIG: Layout for iPad](https://developer.apple.com/design/human-interface-guidelines/layout)
