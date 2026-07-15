@@ -1,5 +1,7 @@
 # iPad Adaptive Layout: HStack + Conditional Pane
 
+> ⭐ **If this saved you time, please [star](https://github.com/zy5120/ipad-adaptive-layout-ios26) and [fork](https://github.com/zy5120/ipad-adaptive-layout-ios26) the repo!**
+
 A reusable SwiftUI pattern that replaces `NavigationSplitView` with a predictable `HStack`-based adaptive layout. Designed for iOS 26+ apps that need portrait-sheet / landscape-sidebar behavior without UIKit size class interference or rotation-induced state loss.
 
 ## What It Solves
