@@ -197,11 +197,19 @@ struct SplitDetailPane: View {
     private func morePane<Content: View>(
         @ViewBuilder content: () -> Content
     ) -> some View {
-        ZStack(alignment: .topLeading) {
+        NavigationStack {
             content()
-            if showCloseButton { closeButton }
+                .toolbar {
+                    if showCloseButton {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button { dismiss(); selection = .none } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 16, weight: .semibold))
+                            }
+                        }
+                    }
+                }
         }
-        .background(.background)
     }
 }
 ```
@@ -210,36 +218,47 @@ struct SplitDetailPane: View {
 
 | View type | Wrapping method | Example |
 |-----------|----------------|---------|
-| Simple list/static content | `morePane { }` wrapper | TarotCatalogView, PrivacyDetailView |
-| Complex interactive view | Inline `ZStack(alignment: .topLeading)` | CardDrawView, FlowView |
-| Fullscreen dark background | Own overlay (same style, adapted color) | RitualView with white foreground |
+| Simple list/static content | `morePane { }` wrapper (NavigationStack + toolbar xmark) | TarotCatalogView, PrivacyDetailView |
+| Complex interactive view | Own NavigationStack + toolbar xmark inline | CardDrawView, reminderView |
+| Fullscreen dark background | NavigationStack + `.toolbarBackground(.hidden)` | RitualView with white foreground |
 
-All use the same `closeButton` defined in Option 5.
+All use the same **toolbar xmark** pattern defined in Option 5.
 
-### Option 5: The Close Button Pattern
+### Option 5: The Toolbar Close Button Pattern
 
-A floating circular close button that works identically across all detail views. Always placed in a `ZStack(alignment: .topLeading)`.
+A native navigation-bar xmark button. Every view that needs a close button wraps itself in `NavigationStack` and adds this toolbar item. Only shown when `showCloseButton` is true (landscape mode).
 
 ```swift
-private var closeButton: some View {
-    Button {
-        dismiss()                    // no-op if not in sheet context
-        selection = .none            // always works, resets the pane
-    } label: {
-        Image(systemName: "xmark")
-            .font(.system(size: 16, weight: .semibold))
-            .foregroundStyle(.secondary)
-            .frame(width: 36, height: 36)
-            .background(.ultraThinMaterial, in: Circle())
-    }
-    .padding(.leading, 8)
-    .padding(.top, 8)
-    .contentShape(Circle())
-    .zIndex(999)
+NavigationStack {
+    ContentView(...)
+        .toolbar {
+            if showCloseButton {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button {
+                        dismiss()                // portrait: dismiss sheet
+                        selection = .none        // landscape: clear sidebar
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 16, weight: .semibold))
+                    }
+                }
+            }
+        }
 }
 ```
 
-Why `dismiss()` + `selection = .none`? `dismiss()` handles the sheet case (system dismiss animation). `selection = .none` handles the inline case (clears the binding, right pane reverts to empty state). Calling both is safe — `dismiss()` is a no-op when not in a sheet context.
+**Why toolbar xmark instead of floating overlay?**
+
+| Toolbar xmark | Floating overlay |
+|---|---|
+| Native nav-bar appearance, matches iOS HIG | Custom Circle+material, non-standard |
+| Zero z-index conflicts | Must fight with scroll views and sheets |
+| Same position in every view (nav bar top-left) | Position varies with padding tweaks |
+| Works with NavigationStack title, search bar, other toolbar items | Blocks content area |
+
+**Why `dismiss()` + `selection = .none`?** `dismiss()` handles the sheet case (system dismiss animation). `selection = .none` handles the inline case (clears the binding, right pane reverts to empty state). Calling both is safe — `dismiss()` is a no-op when not in a sheet context.
+
+**For dark-background fullscreen views** (like a card-drawing ritual): add `.toolbarBackground(.hidden, for: .navigationBar)` to make the nav bar transparent while keeping the xmark visible. Use `.foregroundStyle(.white.opacity(0.8))` for visibility on dark backgrounds.
 
 ### Option 6: rightAlignSheet (Sheet vs Overlay for Sub-prompts)
 
