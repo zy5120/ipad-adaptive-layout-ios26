@@ -133,20 +133,16 @@ enum DetailSelection: Equatable {
         }
     }
 
-    /// Portrait sheet initial height. nil = full screen. [.medium, .large] = half-screen start, draggable to full.
-    /// Use medium for browseable lists; use nil for interactive/transactional views.
+    /// Portrait sheet height. nil = native [.medium, .large] two-stage draggable.
     var sheetDetents: Set<PresentationDetent>? {
-        switch self {
-        case .catalog, .methodsDetail: return [.medium, .large]
-        default: return nil
-        }
+        return nil  // all pages get native two-stage behavior
     }
 }
 ```
 
 The `.none` case is special — selecting it dismisses whatever is currently shown.
 
-**`sheetDetents` rule:** Content-heavy list views → `[.medium, .large]` (nav bar stays pinned when scrolling). Interactive views (forms, card-draw, rituals) → `nil` (full screen). Landscape sidebar ignores detents entirely.
+**`sheetDetents` rule:** Default `nil` = native `[.medium, .large]` — every sheet can drag between half-screen and full-screen. Only override to `[.large]` if a page truly cannot function at half height (rare). Landscape sidebar ignores detents entirely.
 
 ### Option 3: ContentView (Sheet Orchestrator)
 
