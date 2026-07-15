@@ -171,13 +171,25 @@ struct ContentView: View {
             if sidebar { showDetailSheet = false }
         }
         // Selection gate: new selection in portrait triggers sheet
+        // 注意：链式切换（sheet 在场时 selection 变化）必须走 isChainTransition 保护，见下节
         .onChange(of: detailSelection) { _, sel in
             if sel == .none { showDetailSheet = false }
-            if sel.needsSheet && !isSidebar { showDetailSheet = true }
+            if sel.needsSheet && !isSidebar {
+                if showDetailSheet {
+                    isChainTransition = true
+                    showDetailSheet = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        isChainTransition = false
+                        showDetailSheet = true
+                    }
+                } else {
+                    showDetailSheet = true
+                }
+            }
         }
-        // Dismiss gate: sheet swipe-dismiss clears selection
+        // Dismiss gate: sheet swipe-dismiss clears selection（豁免链式过渡，否则 selection 被清空）
         .onChange(of: showDetailSheet) { _, showing in
-            if !showing, !isSidebar { detailSelection = .none }
+            if !showing, !isSidebar, !isChainTransition { detailSelection = .none }
         }
         .sheet(isPresented: $showDetailSheet) {
             SplitDetailPane(selection: $detailSelection)
@@ -186,7 +198,19 @@ struct ContentView: View {
 }
 ```
 
+需要的状态：`@State private var isChainTransition = false`。
+
 **Key insight:** The `.sheet(isPresented: $showDetailSheet)` call only fires in portrait mode. In landscape, `showDetailSheet` is always `false`, so the sheet never presents. Instead, `SplitDetailPane` renders inline in the `HStack` of `AdaptiveRootView`.
+
+### 链式 Sheet 铁律（血泪教训 ×2：塔罗 + 六壬）
+
+多步流程（如 方式选择 → 温馨提示 → 输入 → 结果）全部渲染在**同一个** SplitDetailPane sheet 内，靠改 `selection` 原地切换内容。迁移旧的独立 sheet 进 DetailSelection 时：
+
+1. **链内子视图（含最终提交按钮）绝对不许调 `dismiss()`**。适配前独立 `.sheet` 时代的 `dismiss()` 是正确的，迁移后变成毒药：它拉下整个 SplitDetailPane sheet，与 selection gate 的 re-present 竞态。症状 = "点提交后没有任何 sheet 出现"。提交回调里只改 `context.selection = .xxx`。
+2. `dismiss()` 只允许出现在**取消**路径（toolbar 取消按钮），通常配 `selection = .none`。
+3. 上面 Selection gate 的 `isChainTransition` 保护 + Dismiss gate 的豁免缺一不可。
+
+**排查口诀**：链式 sheet 不出现 → 先 grep 链内视图的 `dismiss()` 调用。
 
 ### Option 4: SplitDetailPane (Dual-Mode Detail View)
 
