@@ -162,6 +162,8 @@ A single view that works in both contexts. The `showCloseButton` flag controls b
 - **Landscape (showCloseButton: true):** Renders inline. Shows a floating close button that resets `selection = .none`.
 - **Portrait (showCloseButton: false):** Renders inside a `.sheet`. Close button is hidden (system swipe-dismiss handles it).
 
+**Critical rule — close button ownership:** The close button MUST be owned by `SplitDetailPane`, applied as an overlay wrapper around child content. Child views (CardDrawView, TarotCatalogView, etc.) must NEVER draw their own close button. This guarantees visual consistency — every sidebar view has the identical floating xmark in the same position.
+
 ```swift
 struct SplitDetailPane: View {
     @Binding var selection: DetailSelection
@@ -175,20 +177,44 @@ struct SplitDetailPane: View {
         case .cardDetail(let card):
             CardDetailView(card: card)
         case .startFlow(let type, ...):
-            FlowView(
-                onComplete: { result in
-                    selection = .nextStep(result)
-                },
-                onClose: {
-                    dismiss()               // works in sheet mode
-                    selection = .none       // works in both modes
-                }
-            )
+            // ✅ WRAP with ZStack, let SplitDetailPane own the close button
+            ZStack(alignment: .topLeading) {
+                FlowView(
+                    onComplete: { result in
+                        selection = .nextStep(result)
+                    },
+                    onClose: {
+                        dismiss()               // works in sheet mode
+                        selection = .none       // works in both modes
+                    }
+                )
+                if showCloseButton { closeButton }
+            }
         }
-        // ... closeButton overlay when showCloseButton == true ...
+    }
+
+    // Generic wrapper for simple content (lists, static views)
+    private func morePane<Content: View>(
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        ZStack(alignment: .topLeading) {
+            content()
+            if showCloseButton { closeButton }
+        }
+        .background(.background)
     }
 }
 ```
+
+**Wrapper pattern summary — every SplitDetailPane branch that needs a close button:**
+
+| View type | Wrapping method | Example |
+|-----------|----------------|---------|
+| Simple list/static content | `morePane { }` wrapper | TarotCatalogView, PrivacyDetailView |
+| Complex interactive view | Inline `ZStack(alignment: .topLeading)` | CardDrawView, FlowView |
+| Fullscreen dark background | Own overlay (same style, adapted color) | RitualView with white foreground |
+
+All use the same `closeButton` defined in Option 5.
 
 ### Option 5: The Close Button Pattern
 
