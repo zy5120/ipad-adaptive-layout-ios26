@@ -601,6 +601,53 @@ LazyVGrid(
 
 **Rule of thumb:** Sidebar width ≈ `max(360, screenWidth × 0.35)`. On a 1024pt iPad landscape, that's ~360pt. Design for that minimum. Use `.frame(maxWidth: .infinity)`, `LazyVGrid`, `ScrollView(.horizontal)`, or `ViewThatFits` instead of fixed-width horizontal stacks.
 
+### Pitfall 8: Chained sheet navigation broken — second sheet never appears
+
+**Symptom:** Sheet A opens. Tapping an option inside Sheet A should close it and open Sheet B. Sheet A closes but Sheet B never appears. Works fine in landscape (sidebar), only broken in portrait (sheet).
+
+**Cause:** `dismiss()` calls inside child views (e.g., `Button { dismiss(); onSelect(x) }`) trigger the dismiss gate which clears `detailSelection = .none`, erasing the new selection set by `onSelect`. Also, `showDetailSheet` toggling from `true→false→true` needs a flag to prevent the dismiss gate from misfiring.
+
+**Fix — three pieces:**
+
+1. Add `isChainTransition` flag to ContentView:
+```swift
+@State private var isChainTransition = false
+```
+
+2. Guard the dismiss gate:
+```swift
+.onChange(of: showDetailSheet) { _, showing in
+    if !showing, !isSidebar, !isChainTransition { detailSelection = .none }
+}
+```
+
+3. Set the flag when navigating between sheets:
+```swift
+.onChange(of: detailSelection) { _, sel in
+    if sel.needsSheet && !isSidebar {
+        if showDetailSheet {
+            isChainTransition = true
+            showDetailSheet = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                isChainTransition = false
+                showDetailSheet = true
+            }
+        } else {
+            showDetailSheet = true
+        }
+    }
+}
+```
+
+4. **Remove `dismiss()` from child view buttons** — let ContentView manage all transitions:
+```swift
+// ❌ Dismiss in child breaks chain
+Button { dismiss(); onSelect(method) }
+
+// ✅ Let ContentView handle the transition
+Button { onSelect(method) }
+```
+
 ### Architecture: Single-File Page Registration
 
 After refactoring, all page rendering lives in `DetailSelection.makeView(context:)`. `SplitDetailPane` is a thin shell (~30 lines) that never needs modification when adding pages.
