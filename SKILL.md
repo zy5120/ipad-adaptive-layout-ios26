@@ -648,6 +648,25 @@ Button { dismiss(); onSelect(method) }
 Button { onSelect(method) }
 ```
 
+### Pitfall 9: Canvas flickers during window resize
+
+**Symptom:** `TimelineView(.animation)` + `Canvas` with text/characters flickers violently when the window is resized (Stage Manager drag, rotation).
+
+**Cause:** `context.resolve(Text(...))` is the most expensive Canvas operation. During resize, the window size changes every frame, `TimelineView(.animation)` fires on each, and 20-50 `Text.resolve()` calls per frame grind to a halt.
+
+**Fix:** Use `Path` shapes instead of `Text` in Canvas:
+```swift
+// ❌ Expensive — Text resolution per frame
+context.draw(context.resolve(Text("☰").font(...)), at: point)
+
+// ✅ Cheap — Path drawing
+context.fill(
+    Path(ellipseIn: CGRect(x: x, y: y, width: size, height: size)),
+    with: .color(color.opacity(alpha))
+)
+```
+Canvas was designed for fast geometry (paths, ellipses, lines). It was NOT designed to rasterize text glyphs at 60fps. Match the original StarfieldCanvas pattern: particles as ellipses with glow halos.
+
 ### Architecture: Single-File Page Registration
 
 After refactoring, all page rendering lives in `DetailSelection.makeView(context:)`. `SplitDetailPane` is a thin shell (~30 lines) that never needs modification when adding pages.
