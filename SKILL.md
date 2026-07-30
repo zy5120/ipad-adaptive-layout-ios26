@@ -192,6 +192,25 @@ private var isLandscape: Bool {
 
 ---
 
+## 铁律
+
+### fish-fullscreen 模式下禁止额外导航按钮
+
+NavigationStack push 自带返回箭头。页面内**禁止**添加取消、完成、关闭等 toolbar 按钮。`dismiss()` 仅限取消路径使用。
+
+```swift
+// ❌ push 模式下的多余按钮
+.toolbar {
+    ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+}
+
+// ✅ 不设取消/关闭按钮，返回箭头自动出现
+```
+
+排查命令：`grep -n "cancellationAction\|topBarLeading" <file>.swift`
+
+---
+
 ## 相关
 
 - [Apple HIG: Layout for iPad](https://developer.apple.com/design/human-interface-guidelines/layout)
