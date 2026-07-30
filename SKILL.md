@@ -209,6 +209,15 @@ NavigationStack push 自带返回箭头。页面内**禁止**添加取消、完�
 
 排查命令：`grep -n "cancellationAction\|topBarLeading" <file>.swift`
 
+### 竖屏全屏时导航栏按钮去重
+
+NavigationStack 自带返回箭头。若页面 toolbar 内出现功能重复的图标（如既有 `<` 又有 `xmark`），只保留一个。原则：
+
+- 左上角 `.cancellationAction`：**不放任何按钮**。返回由 NavigationStack 自动提供
+- 右上角 `.confirmationAction` / `.primaryAction`：最多一个按钮。功能相似则合并
+
+横屏副屏（`showCloseButton = true`）不受此限制——需要 `xmark` 关闭副屏。
+
 ### 导航按钮用符号不用文字
 
 竖屏返回由 NavigationStack 自动提供。自定义按钮全部用 SF Symbol：
