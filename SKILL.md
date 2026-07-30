@@ -244,6 +244,68 @@ ToolbarItem(placement: .confirmationAction) {
 
 ---
 
+## 踩坑记录
+
+### 副屏 xmark 关闭需同时 reset selection
+
+`onClose` 回调中仅 `dismiss()` 不够，必须同时 `selection = .none`。横屏副屏的 xmark 调用 `onClose`，缺失 `selection = .none` 会导致副屏空白但不关闭。
+
+```swift
+// ✅ 正确
+onClose: { context.dismiss(); context.selection = .none }
+
+// ❌ 只 dismiss 不清 selection——副屏关不掉
+onClose: { context.dismiss() }
+```
+
+### context 改为 optional 后的兼容写法
+
+当 `DetailPaneContext?` 改为可选时，`@Binding var selection` 不能通过可选链直接赋值。写法：
+
+```swift
+// ✅ 正确
+onClose: { context?.dismiss(); if let ctx = context { ctx.selection = .none } }
+
+// ❌ 不能用 wrappedValue
+context?.selection.wrappedValue = .none  // 编译失败
+```
+
+### 自定义 init 扩展参数
+
+视图有自定义 `init` 时，新增的默认参数不会自动透传。必须在 `init` 签名中显式添加。
+
+```swift
+// 旧
+init(card: Card, startReversed: Bool) { ... }
+
+// 新（加 showCloseButton + onClose）
+init(card: Card, startReversed: Bool, showCloseButton: Bool = false, onClose: (() -> Void)? = nil) {
+    self.card = card
+    self.showCloseButton = showCloseButton  // ← 必须显式赋值
+    self.onClose = onClose
+    ...
+}
+```
+
+### 页面内容需基于宽度自适应
+
+竖屏 push 全宽，横屏副屏仅 ~35% 宽度。页面内固定宽度的元素（如 `frame(width: ...)` 的 Picker、网格等）在副屏会溢出。使用 `.frame(maxWidth: .infinity)`、`LazyVGrid`、`ScrollView(.horizontal)` 等响应式布局。
+
+### 横屏时子页面用 detailSelection 路由而非 push
+
+当页面在横屏副屏内时，其子页面的点击应设 `detailSelection` 让副屏切换，而非 push 到当前 NavigationStack（会挤在窄栏内）。
+
+```swift
+// ✅ 横屏用 detailSelection 路由副屏
+if showCloseButton {
+    detailSelection = .cardDetail(card)
+} else {
+    pushedCard = card  // 竖屏 push
+}
+```
+
+---
+
 ## 相关
 
 - [Apple HIG: Layout for iPad](https://developer.apple.com/design/human-interface-guidelines/layout)
