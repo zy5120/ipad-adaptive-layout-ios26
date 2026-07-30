@@ -1,7 +1,20 @@
 ---
 name: 小鱼平板适配forOS26
-description: "iPad adaptive layout using HStack + conditional pane (NOT NavigationSplitView). Use when: building iOS 26+ SwiftUI apps that need portrait-sheet/landscape-sidebar behavior without UIKit size class interference."
+version: "0.2.0"
+description: "iPad adaptive layout using HStack + conditional pane (NOT NavigationSplitView). Use when: building iOS 26+ SwiftUI apps that need portrait-sheet-or-fullscreen/landscape-sidebar behavior without UIKit size class interference."
 ---
+
+> [!NOTE]
+> **Skill 版本: v0.2.0** — 竖屏支持 sheet / fullScreen 双模式，横屏统一映射到副屏。
+
+## 为什么选择这套方案？
+
+- **自适应 iPad 横屏布局** — 一套代码同时驱动竖屏 sheet/fullScreen 和横屏侧栏，旋转不丢状态
+- **竖屏双模式** — 每页可独立选择竖屏用 Sheet 还是 FullScreen，横屏统一映射到副屏
+- **提前适配 iPhone Ultra 折叠屏** — HStack + 条件栏架构天然适配传闻中的 iPhone Ultra 折叠形态，横屏自动切双栏，无需改一行代码
+- **零依赖** — 纯 SwiftUI，不依赖任何第三方库，iOS 26+ 原生 API
+- **模板模式一键注册** — 新增页面只需在 `DetailSelection` 枚举加一个 case，`SplitDetailPane` 永不改动
+- **链式 Sheet 不掉链** — 多步流程（选择→提示→输入→结果）在同一个 sheet 内平滑切换，已适配竖屏/横屏双模式
 
 > [!IMPORTANT]
 > **Open Source / Attribution**
@@ -36,6 +49,7 @@ Then proceed with the chosen mode. Both modes use the same core patterns below.
 | NavigationSplitView destroys child state on rotation | Use `HStack` with conditional right pane |
 | `horizontalSizeClass` triggers wrong layout on iPad | Detect layout via `windowSize.width >= windowSize.height` |
 | Sheet-on-top-of-sheet stacking in landscape | Use `.overlay` instead of `.sheet` for sub-prompts |
+| Need fullScreen in portrait but sidebar in landscape | Use `presentationMode = .fullScreen` — ContentView handles `.fullScreenCover` → sidebar transition |
 | ObservableObject dies on rotation | Hoist it to the root `AdaptiveRootView` |
 | Split-pane close button needs same code in both modes | `onClose: { dismiss(); selection = .none }` |
 | UIKit split-view gestures interfere with custom layout | Force `.environment(\.horizontalSizeClass, .compact)` on sidebar |
@@ -46,7 +60,7 @@ Then proceed with the chosen mode. Both modes use the same core patterns below.
 
 ## The Architecture
 
-The entire layout lives inside a single `HStack` container. The left pane (sidebar/tab bar) is always present. The right pane (detail) is added conditionally when `isLandscape` is true. When `isLandscape` is false, detail content is shown via `.sheet` modals instead.
+The entire layout lives inside a single `HStack` container. The left pane (sidebar/tab bar) is always present. The right pane (detail) is added conditionally when `isLandscape` is true. When `isLandscape` is false, detail content is shown via `.sheet` or `.fullScreenCover` (per-page choice). Rotating from portrait to landscape dismisses the overlay and renders the same content inline in the right pane — state survives because `ObservableObject`s are hoisted at root.
 
 ```
 AdaptiveRootView (HStack)
@@ -118,21 +132,25 @@ struct AdaptiveRootView: View {
 An enum that drives all detail/sheet routing. The `needsSheet` computed property distinguishes between lightweight overlays (like card tooltips) and full-screen flows that need a sheet in portrait mode.
 
 ```swift
+enum PresentationMode {
+    case inline     // 不弹窗（tooltip 等）
+    case sheet      // 竖屏底部 sheet
+    case fullScreen // 竖屏全屏覆盖
+}
+
 enum DetailSelection: Equatable {
     case none
-    case cardDetail(Card)              // lightweight — never a sheet
-    case historyEntry(HistoryEntry)    // heavy — sheet in portrait
-    case startFlow(FlowType, params...) // heavy — sheet in portrait
+    case cardDetail(Card)              // inline — never presents
+    case historyEntry(HistoryEntry)    // fullScreen in portrait
+    case startFlow(FlowType, params...) // sheet in portrait
 
-    /// True when this case should be presented as a sheet in portrait mode.
-    /// Lightweight cases (tooltips, quick info) should be false.
-    var needsSheet: Bool {
+    var presentationMode: PresentationMode {
         switch self {
-        case .none, .cardDetail: return false
-        case .historyEntry, .startFlow: return true
+        case .none, .cardDetail: return .inline
+        case .historyEntry:      return .fullScreen
+        case .startFlow:         return .sheet
         }
     }
-
 }
 ```
 
@@ -148,59 +166,86 @@ The `.none` case is special — selecting it dismisses whatever is currently sho
 ```
 Every sheet starts at half-screen, draggable to full. Individual pages don't need to set their own detents.
 
-### Option 3: ContentView (Sheet Orchestrator)
+### Option 3: ContentView (Sheet + FullScreen Orchestrator)
 
-The left pane (usually a `TabView`). Manages a single `@State private var showDetailSheet = false` that controls sheet presentation. The `onChange` handlers react to both orientation changes and selection changes.
+The left pane (usually a `TabView`). Manages two presentation states: `showDetailSheet` and `showDetailFullScreen`. The `onChange` handlers react to orientation changes, selection changes, and dismissals.
 
 ```swift
 struct ContentView: View {
     @Binding var detailSelection: DetailSelection
     let isSidebar: Bool
     @State private var showDetailSheet = false
+    @State private var showDetailFullScreen = false
+    @State private var isChainTransition = false
 
     var body: some View {
         TabView(selection: $selectedTab) {
             // ... tab pages ...
         }
-        .onAppear {
-            showDetailSheet = !isSidebar && detailSelection.needsSheet
-        }
-        // Rotate gate: landscape -> dismiss sheet; portrait -> show sheet if needed
+        .onAppear { syncPresentation() }
         .onChange(of: isSidebar) { _, sidebar in
-            if !sidebar && detailSelection.needsSheet { showDetailSheet = true }
-            if sidebar { showDetailSheet = false }
-        }
-        // Selection gate: new selection in portrait triggers sheet
-        // 注意：链式切换（sheet 在场时 selection 变化）必须走 isChainTransition 保护，见下节
-        .onChange(of: detailSelection) { _, sel in
-            if sel == .none { showDetailSheet = false }
-            if sel.needsSheet && !isSidebar {
-                if showDetailSheet {
-                    isChainTransition = true
-                    showDetailSheet = false
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                        isChainTransition = false
-                        showDetailSheet = true
-                    }
-                } else {
-                    showDetailSheet = true
-                }
+            if sidebar {
+                // 横屏：关弹窗，内容自动映射到副屏 SplitDetailPane
+                showDetailSheet = false
+                showDetailFullScreen = false
+            } else {
+                syncPresentation()
             }
         }
-        // Dismiss gate: sheet swipe-dismiss clears selection（豁免链式过渡，否则 selection 被清空）
+        .onChange(of: detailSelection) { _, sel in handleSelectionChange(sel) }
         .onChange(of: showDetailSheet) { _, showing in
             if !showing, !isSidebar, !isChainTransition { detailSelection = .none }
         }
+        .onChange(of: showDetailFullScreen) { _, showing in
+            if !showing, !isSidebar { detailSelection = .none }
+        }
         .sheet(isPresented: $showDetailSheet) {
             SplitDetailPane(selection: $detailSelection)
+                .presentationDetents([.medium, .large])
+        }
+        .fullScreenCover(isPresented: $showDetailFullScreen) {
+            SplitDetailPane(selection: $detailSelection, showCloseButton: false)
+        }
+    }
+
+    private func syncPresentation() {
+        guard !isSidebar else { return }
+        switch detailSelection.presentationMode {
+        case .sheet:      showDetailSheet = true
+        case .fullScreen: showDetailFullScreen = true
+        case .inline:     break
+        }
+    }
+
+    private func handleSelectionChange(_ sel: DetailSelection) {
+        if sel == .none {
+            showDetailSheet = false
+            showDetailFullScreen = false
+            return
+        }
+        guard !isSidebar else { return }
+        switch sel.presentationMode {
+        case .sheet:
+            if showDetailSheet {
+                isChainTransition = true
+                showDetailSheet = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    isChainTransition = false
+                    showDetailSheet = true
+                }
+            } else {
+                showDetailSheet = true
+            }
+        case .fullScreen:
+            showDetailFullScreen = true
+        case .inline:
+            break
         }
     }
 }
 ```
 
-需要的状态：`@State private var isChainTransition = false`。
-
-**Key insight:** The `.sheet(isPresented: $showDetailSheet)` call only fires in portrait mode. In landscape, `showDetailSheet` is always `false`, so the sheet never presents. Instead, `SplitDetailPane` renders inline in the `HStack` of `AdaptiveRootView`.
+**Key insight:** In landscape, both `showDetailSheet` and `showDetailFullScreen` are `false`, so no overlay presents. `SplitDetailPane` renders inline in the `HStack` of `AdaptiveRootView` — same content, same state, zero data loss.
 
 ### 链式 Sheet 铁律（血泪教训 ×2：塔罗 + 六壬）
 
@@ -361,6 +406,127 @@ struct InnerView: View {
 
 **The trick:** `.sheet(isPresented: .constant(false))` permanently disables the sheet in landscape. The `.overlay` block then shows the same content inline. In portrait, the overlay block is never rendered (`rightAlignSheet` is false), so the normal `.sheet` fires instead.
 
+### Option 7: Portrait Presentation Mode — Sheet vs FullScreen (v0.2.0 新增)
+
+每页通过 `presentationMode` 选择竖屏呈现方式。横屏统一映射到副屏，旋转自动切换。
+
+```swift
+enum DetailSelection: Equatable {
+    case none
+    case methodsPicker                               // sheet
+    case divinationResult(god, method, context)       // fullScreen
+    case historyEntry(HistoryEntry)                   // fullScreen
+
+    /// 竖屏呈现模式：.sheet（默认）或 .fullScreen
+    var presentationMode: PresentationMode {
+        switch self {
+        case .none:           return .inline
+        case .methodsPicker:  return .sheet
+        case .divinationResult: return .fullScreen
+        case .historyEntry:   return .fullScreen
+        default:              return .sheet
+        }
+    }
+}
+
+enum PresentationMode {
+    case inline     // 轻量内容，不弹窗（如 tooltip）
+    case sheet      // 竖屏底部 sheet，横屏副屏
+    case fullScreen // 竖屏全屏覆盖，横屏副屏
+}
+```
+
+**ContentView 同时管理 sheet 和 fullScreen：**
+
+```swift
+struct ContentView: View {
+    @Binding var detailSelection: DetailSelection
+    let isSidebar: Bool
+    @State private var showDetailSheet = false
+    @State private var showDetailFullScreen = false
+    @State private var isChainTransition = false
+
+    var body: some View {
+        TabView(selection: $selectedTab) { /* ... */ }
+            .onAppear { syncPresentation() }
+            .onChange(of: isSidebar) { _, sidebar in
+                if sidebar {
+                    // 横屏：关掉所有弹窗，内容进副屏
+                    showDetailSheet = false
+                    showDetailFullScreen = false
+                } else {
+                    syncPresentation()
+                }
+            }
+            .onChange(of: detailSelection) { _, sel in handleSelectionChange(sel) }
+            .onChange(of: showDetailSheet) { _, showing in
+                if !showing, !isSidebar, !isChainTransition { detailSelection = .none }
+            }
+            .onChange(of: showDetailFullScreen) { _, showing in
+                if !showing, !isSidebar { detailSelection = .none }
+            }
+            .sheet(isPresented: $showDetailSheet) {
+                SplitDetailPane(selection: $detailSelection)
+                    .presentationDetents([.medium, .large])
+            }
+            .fullScreenCover(isPresented: $showDetailFullScreen) {
+                SplitDetailPane(selection: $detailSelection, showCloseButton: false)
+            }
+    }
+
+    private func syncPresentation() {
+        guard !isSidebar else { return }
+        switch detailSelection.presentationMode {
+        case .sheet:      showDetailSheet = true
+        case .fullScreen: showDetailFullScreen = true
+        case .inline:     break
+        }
+    }
+
+    private func handleSelectionChange(_ sel: DetailSelection) {
+        if sel == .none {
+            showDetailSheet = false
+            showDetailFullScreen = false
+            return
+        }
+        guard !isSidebar else { return }
+        switch sel.presentationMode {
+        case .sheet:
+            chainPresent(toggle: &showDetailSheet)
+        case .fullScreen:
+            showDetailFullScreen = true
+        case .inline:
+            break
+        }
+    }
+
+    private func chainPresent(toggle: inout Bool) {
+        if toggle {
+            isChainTransition = true
+            toggle = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                isChainTransition = false
+                toggle = true
+            }
+        } else {
+            toggle = true
+        }
+    }
+}
+```
+
+**旋转过渡核心逻辑：**
+
+竖屏全屏 → 横屏：`showDetailFullScreen = false`，`SplitDetailPane` 直接在 HStack 副屏渲染同一内容。因为 `@StateObject` 挂在 `AdaptiveRootView`，状态跨越旋转不丢。
+
+竖屏 sheet → 横屏：同上，`showDetailSheet = false`，内容进副屏。
+
+**`detailSelection = .none` 统一关闭：**
+
+无论当前是 sheet 还是 fullScreen，设为 `.none` 都会触发各自的 dismiss gate 关掉弹窗，同时在横屏下清空副屏内容。
+
+---
+
 ## Rotation Survival: Hoist ObservableObject
 
 Any `@StateObject` declared inside a view that is conditionally rendered (like `SplitDetailPane`) will be destroyed and recreated on rotation. The fix: declare it at the root level and pass it down via `.environmentObject()`.
@@ -426,15 +592,24 @@ Starting a new iPad-adaptive app from scratch:
 
 ```swift
 // 1. Define your selection enum
+enum PresentationMode {
+    case inline
+    case sheet
+    case fullScreen
+}
+
 enum AppSelection: Equatable {
     case none
-    case detail(Item)
-    case flow(FlowParams)
+    case detail(Item)        // inline
+    case settings             // sheet
+    case flow(FlowParams)    // fullScreen
 
-    var needsSheet: Bool {
-        if case .none = self { return false }
-        if case .detail = self { return false }
-        return true
+    var presentationMode: PresentationMode {
+        switch self {
+        case .none, .detail: return .inline
+        case .settings:      return .sheet
+        case .flow:          return .fullScreen
+        }
     }
 }
 
@@ -672,6 +847,67 @@ Button { dismiss(); onSelect(method) }
 Button { onSelect(method) }
 ```
 
+### Pitfall 10: Sheet 左上角残留多余的取消/关闭按钮
+
+**Symptom:** Sheet 弹出后左上角有「取消」按钮或其他 toolbar 按钮，与 SplitDetailPane 的 xmark 关闭按钮功能重复，视觉累赘。
+
+**Cause:** 子视图内部自己加了 `ToolbarItem(placement: .cancellationAction)` 或 `ToolbarItem(placement: .topBarLeading)`，没有意识到外层 `morePane` 或 `SplitDetailPane` 已经统一管理关闭逻辑。
+
+**Fix — 修改任何 sheet/页面时必须先检查：**
+
+```swift
+// ❌ 子视图自带取消按钮 — 与外层 xmark 重复
+NavigationStack {
+    content
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("取消") { dismiss() }  // ← 多余，删掉
+            }
+        }
+}
+
+// ✅ 子视图不管理关闭 — 交给外层 SplitDetailPane
+NavigationStack {
+    content  // toolbar 只放页面特有操作，不放取消/关闭
+}
+```
+
+**排查规则：修改任何 sheet 页面内容前，先 grep 该文件：**
+```bash
+grep -n "cancellationAction\|topBarLeading\|ToolbarItem" <file>.swift
+```
+如果命中 `cancellationAction` 或 `topBarLeading` 且内容为取消/关闭按钮 → **先删除，再做其他修改**。
+
+**典型场景：**
+- `ReminderSheet`（温馨提示）：自带「取消」按钮，与外层 `morePane` 的 xmark 重复 → 删除 toolbar
+- 其他从独立 `.sheet` 迁移过来的页面：旧代码残留 `dismiss()` 按钮 → 删除，关闭统一由外层处理
+
+**口诀：Sheet 内不放取消按钮。关闭永远是外层 SplitDetailPane / morePane 的事。**
+
+### Pitfall 11: fullScreenCover 旋转后内容消失
+
+**Symptom:** 竖屏 fullScreenCover 正常显示，旋转到横屏后内容消失，副屏空白。
+
+**Cause:** 只设置了 `showDetailFullScreen = false`，但没有在横屏 HStack 中渲染同一个 `DetailSelection` 的内容。fullScreenCover dismiss 后 `SplitDetailPane` 的条件渲染已经生效，但 `detailSelection` 仍指向同一 case — 所以内容应该自动出现在副屏。
+
+**Fix — 检查两点：**
+1. `AdaptiveRootView` 的 `isLandscape` 计算是否正确（`windowSize.width >= windowSize.height`）
+2. `isSidebar` 切换到 `true` 时，`onChange(of: isSidebar)` 是否同时关了 sheet 和 fullScreen：
+```swift
+.onChange(of: isSidebar) { _, sidebar in
+    if sidebar {
+        showDetailSheet = false       // 关 sheet
+        showDetailFullScreen = false  // 关 fullScreen
+        // detailSelection 不变 → SplitDetailPane 在副屏渲染同一内容
+    } else {
+        syncPresentation()
+    }
+}
+```
+3. 确保 `@StateObject` / 共享状态在 `AdaptiveRootView` 层持有，不是 SplitDetailPane 内部。
+
+**关键：** 竖屏 fullScreen → 横屏副屏的过渡是无缝的 —— fullScreen dismiss + HStack 出现同一 view。用户只看到内容从全屏「缩」到右半屏。
+
 ### Pitfall 9: Canvas flickers during window resize
 
 **Symptom:** `TimelineView(.animation)` + `Canvas` with text/characters flickers violently when the window is resized (Stage Manager drag, rotation).
@@ -721,19 +957,24 @@ SidebarButton(selection: $detailSelection, target: .myNewPage) {
 }
 ```
 
-### Checklist: Adding a new view to the sidebar
+### Checklist: Adding or Modifying a Sidebar View
 
+**修改现有页面时，先做这两步：**
+0a. **grep 检查 toolbar 残留按钮：** `grep -n "cancellationAction\|topBarLeading" <file>.swift` — 如有取消/关闭按钮，先删除（参考 Pitfall 10）
+0b. **grep 检查 dismiss() 调用：** `grep -n "dismiss()" <file>.swift` — 链内提交回调里的 dismiss() 必须删（参考链式 Sheet 铁律），只保留取消路径的 dismiss()
+
+**新增页面时：**
 1. Add case to `DetailSelection` enum
-2. Add `case .yourCase:` branch in `makeView(context:)` — same file
-3. Does the child view have its own `NavigationStack`?
+2. Set `presentationMode` — `.sheet`（表单/选择器）、`.fullScreen`（沉浸式结果/仪式）、`.inline`（轻量内容）
+3. Add `case .yourCase:` branch in `makeView(context:)` — same file
+4. Does the child view have its own `NavigationStack`?
    - **Yes** → Render directly, pass `context.showCloseButton` + onClose
    - **No** → Wrap with `morePane(context: context) { }`
-4. Set `sheetDetents` — list views → `[.medium, .large]`, interactive views → `nil`
 5. Change trigger from `NavigationLink` to `Button { detailSelection = .yourCase }` (or use `SidebarButton`)
 6. If the view used `@Binding var isPresented`, change to `var onDismiss: () -> Void`
 7. **Always** guard toolbar close buttons with `if context.showCloseButton { }`
 8. **Test at narrow width** — sidebar is ~360pt. Fixed-width rows overflow. Use `LazyVGrid`/`.frame(maxWidth: .infinity)`.
-9. Build, test both orientations, verify close button only appears in landscape
+9. Build, test both orientations with both presentation modes
 10. **No changes needed in SplitDetailPane.swift**
 
 ## Related
