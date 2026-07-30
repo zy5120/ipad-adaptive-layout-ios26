@@ -1,16 +1,16 @@
 ---
 name: 小鱼平板适配forOS26
-version: "0.2.0"
-description: "iPad adaptive layout using HStack + conditional pane (NOT NavigationSplitView). Use when: building iOS 26+ SwiftUI apps that need portrait-sheet-or-fullscreen/landscape-sidebar behavior without UIKit size class interference."
+version: "0.3.0"
+description: "iPad adaptive layout using HStack + conditional pane (NOT NavigationSplitView). Use when: building iOS 26+ SwiftUI apps that need portrait-NavigationStack-push-or-sheet/landscape-sidebar behavior without UIKit size class interference."
 ---
 
 > [!NOTE]
-> **Skill 版本: v0.2.0** — 竖屏支持 sheet / fullScreen 双模式，横屏统一映射到副屏。
+> **Skill 版本: v0.3.0** — 竖屏 NavigationStack push + sheet 双模式，横屏统一映射到副屏。去掉 fullScreenCover。
 
 ## 为什么选择这套方案？
 
 - **自适应 iPad 横屏布局** — 一套代码同时驱动竖屏 sheet/fullScreen 和横屏侧栏，旋转不丢状态
-- **竖屏双模式** — 每页可独立选择竖屏用 Sheet 还是 FullScreen，横屏统一映射到副屏
+- **竖屏双模式** — 每页独立选择竖屏用 NavigationStack push 还是 Sheet，横屏统一映射到副屏
 - **提前适配 iPhone Ultra 折叠屏** — HStack + 条件栏架构天然适配传闻中的 iPhone Ultra 折叠形态，横屏自动切双栏，无需改一行代码
 - **零依赖** — 纯 SwiftUI，不依赖任何第三方库，iOS 26+ 原生 API
 - **模板模式一键注册** — 新增页面只需在 `DetailSelection` 枚举加一个 case，`SplitDetailPane` 永不改动
@@ -49,7 +49,7 @@ Then proceed with the chosen mode. Both modes use the same core patterns below.
 | NavigationSplitView destroys child state on rotation | Use `HStack` with conditional right pane |
 | `horizontalSizeClass` triggers wrong layout on iPad | Detect layout via `windowSize.width >= windowSize.height` |
 | Sheet-on-top-of-sheet stacking in landscape | Use `.overlay` instead of `.sheet` for sub-prompts |
-| Need fullScreen in portrait but sidebar in landscape | Use `presentationMode = .fullScreen` — ContentView handles `.fullScreenCover` → sidebar transition |
+| Need NavigationStack push in portrait but sidebar in landscape | Use `presentationMode = .push` — tab 内 NavigationLink 推入，横屏 `detailSelection` 路由副屏 |
 | ObservableObject dies on rotation | Hoist it to the root `AdaptiveRootView` |
 | Split-pane close button needs same code in both modes | `onClose: { dismiss(); selection = .none }` |
 | UIKit split-view gestures interfere with custom layout | Force `.environment(\.horizontalSizeClass, .compact)` on sidebar |
@@ -60,7 +60,7 @@ Then proceed with the chosen mode. Both modes use the same core patterns below.
 
 ## The Architecture
 
-The entire layout lives inside a single `HStack` container. The left pane (sidebar/tab bar) is always present. The right pane (detail) is added conditionally when `isLandscape` is true. When `isLandscape` is false, detail content is shown via `.sheet` or `.fullScreenCover` (per-page choice). Rotating from portrait to landscape dismisses the overlay and renders the same content inline in the right pane — state survives because `ObservableObject`s are hoisted at root.
+The entire layout lives inside a single `HStack` container. The left pane (sidebar/tab bar) is always present. The right pane (detail) is added conditionally when `isLandscape` is true. When `isLandscape` is false, detail content is shown via **NavigationStack push** (each tab has its own NavigationStack) or `.sheet` (per-page choice). Rotating from portrait to landscape: pushed views stay in their tab's stack; `detailSelection` drives the sidebar content.
 
 ```
 AdaptiveRootView (HStack)
@@ -129,26 +129,26 @@ struct AdaptiveRootView: View {
 
 ### Option 2: DetailSelection Enum (Routing)
 
-An enum that drives all detail/sheet routing. The `needsSheet` computed property distinguishes between lightweight overlays (like card tooltips) and full-screen flows that need a sheet in portrait mode.
+An enum that drives all detail/sheet routing. The `presentationMode` property controls how each page appears in portrait mode.
 
 ```swift
 enum PresentationMode {
-    case inline     // 不弹窗（tooltip 等）
-    case sheet      // 竖屏底部 sheet
-    case fullScreen // 竖屏全屏覆盖
+    case inline  // 不弹窗（tooltip 等）
+    case sheet   // 竖屏底部 sheet
+    case push    // 竖屏 NavigationStack push（TabBar 保留）
 }
 
 enum DetailSelection: Equatable {
     case none
-    case cardDetail(Card)              // inline — never presents
-    case historyEntry(HistoryEntry)    // fullScreen in portrait
-    case startFlow(FlowType, params...) // sheet in portrait
+    case settings                       // sheet in portrait
+    case result(Card)                   // push in portrait
+    case historyEntry(HistoryEntry)    // push in portrait
 
     var presentationMode: PresentationMode {
         switch self {
-        case .none, .cardDetail: return .inline
-        case .historyEntry:      return .fullScreen
-        case .startFlow:         return .sheet
+        case .none:          return .inline
+        case .settings:      return .sheet
+        case .result, .historyEntry: return .push
         }
     }
 }
@@ -166,66 +166,38 @@ The `.none` case is special — selecting it dismisses whatever is currently sho
 ```
 Every sheet starts at half-screen, draggable to full. Individual pages don't need to set their own detents.
 
-### Option 3: ContentView (Sheet + FullScreen Orchestrator)
+### Option 3: ContentView (Sheet Orchestrator + Push Awareness)
 
-The left pane (usually a `TabView`). Manages two presentation states: `showDetailSheet` and `showDetailFullScreen`. The `onChange` handlers react to orientation changes, selection changes, and dismissals.
+The left pane (usually a `TabView`). ContentView manages sheet presentation for `.sheet` pages. `.push` pages are handled by each tab's own `NavigationLink` — ContentView is NOT involved.
 
 ```swift
 struct ContentView: View {
     @Binding var detailSelection: DetailSelection
     let isSidebar: Bool
     @State private var showDetailSheet = false
-    @State private var showDetailFullScreen = false
     @State private var isChainTransition = false
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            // ... tab pages ...
+            // ... tab pages — each with its own NavigationStack
         }
-        .onAppear { syncPresentation() }
         .onChange(of: isSidebar) { _, sidebar in
-            if sidebar {
-                // 横屏：关弹窗，内容自动映射到副屏 SplitDetailPane
-                showDetailSheet = false
-                showDetailFullScreen = false
-            } else {
-                syncPresentation()
-            }
+            if sidebar { showDetailSheet = false }
         }
         .onChange(of: detailSelection) { _, sel in handleSelectionChange(sel) }
         .onChange(of: showDetailSheet) { _, showing in
             if !showing, !isSidebar, !isChainTransition { detailSelection = .none }
         }
-        .onChange(of: showDetailFullScreen) { _, showing in
-            if !showing, !isSidebar { detailSelection = .none }
-        }
         .sheet(isPresented: $showDetailSheet) {
             SplitDetailPane(selection: $detailSelection)
                 .presentationDetents([.medium, .large])
         }
-        .fullScreenCover(isPresented: $showDetailFullScreen) {
-            SplitDetailPane(selection: $detailSelection, showCloseButton: false)
-        }
-    }
-
-    private func syncPresentation() {
-        guard !isSidebar else { return }
-        switch detailSelection.presentationMode {
-        case .sheet:      showDetailSheet = true
-        case .fullScreen: showDetailFullScreen = true
-        case .inline:     break
-        }
     }
 
     private func handleSelectionChange(_ sel: DetailSelection) {
-        if sel == .none {
-            showDetailSheet = false
-            showDetailFullScreen = false
-            return
-        }
+        if sel == .none { showDetailSheet = false; return }
         guard !isSidebar else { return }
-        switch sel.presentationMode {
-        case .sheet:
+        if sel.presentationMode == .sheet {
             if showDetailSheet {
                 isChainTransition = true
                 showDetailSheet = false
@@ -236,16 +208,13 @@ struct ContentView: View {
             } else {
                 showDetailSheet = true
             }
-        case .fullScreen:
-            showDetailFullScreen = true
-        case .inline:
-            break
         }
+        // .push 页面不经过 ContentView——各 tab 内 NavigationLink 自行处理
     }
 }
 ```
 
-**Key insight:** In landscape, both `showDetailSheet` and `showDetailFullScreen` are `false`, so no overlay presents. `SplitDetailPane` renders inline in the `HStack` of `AdaptiveRootView` — same content, same state, zero data loss.
+**Key insight:** `.push` 页面在竖屏时不会触发任何 overlay——每个 tab 内部用 `NavigationLink` 推入详情页，TabBar 保留，和标准 iOS 列表→详情模式一致。横屏时所有页面（不管 push 还是 sheet）均通过 `detailSelection` 路由到副屏 `SplitDetailPane`。
 
 ### 链式 Sheet 铁律（血泪教训 ×2：塔罗 + 六壬）
 
@@ -406,124 +375,51 @@ struct InnerView: View {
 
 **The trick:** `.sheet(isPresented: .constant(false))` permanently disables the sheet in landscape. The `.overlay` block then shows the same content inline. In portrait, the overlay block is never rendered (`rightAlignSheet` is false), so the normal `.sheet` fires instead.
 
-### Option 7: Portrait Presentation Mode — Sheet vs FullScreen (v0.2.0 新增)
+### Option 7: Portrait Presentation Mode — NavigationStack Push vs Sheet (v0.3.0)
 
-每页通过 `presentationMode` 选择竖屏呈现方式。横屏统一映射到副屏，旋转自动切换。
+每页通过 `presentationMode` 选择竖屏呈现方式。横屏统一映射到副屏。
 
-```swift
-enum DetailSelection: Equatable {
-    case none
-    case methodsPicker                               // sheet
-    case divinationResult(god, method, context)       // fullScreen
-    case historyEntry(HistoryEntry)                   // fullScreen
+- `.push` — 竖屏：tab 内 `NavigationLink` 推入，TabBar 保留。横屏：`detailSelection` → 副屏
+- `.sheet` — 竖屏：底部 sheet。横屏：`detailSelection` → 副屏
+- `.inline` — 不弹窗
 
-    /// 竖屏呈现模式：.sheet（默认）或 .fullScreen
-    var presentationMode: PresentationMode {
-        switch self {
-        case .none:           return .inline
-        case .methodsPicker:  return .sheet
-        case .divinationResult: return .fullScreen
-        case .historyEntry:   return .fullScreen
-        default:              return .sheet
-        }
-    }
-}
-
-enum PresentationMode {
-    case inline     // 轻量内容，不弹窗（如 tooltip）
-    case sheet      // 竖屏底部 sheet，横屏副屏
-    case fullScreen // 竖屏全屏覆盖，横屏副屏
-}
-```
-
-**ContentView 同时管理 sheet 和 fullScreen：**
+**Tab 内实现 `.push` 的关键模式（参考鱼律项目）：**
 
 ```swift
-struct ContentView: View {
+// DivinationPage.swift — 竖屏用 NavigationLink push，横屏用 Button → detailSelection
+struct DivinationPage: View {
     @Binding var detailSelection: DetailSelection
     let isSidebar: Bool
-    @State private var showDetailSheet = false
-    @State private var showDetailFullScreen = false
-    @State private var isChainTransition = false
 
     var body: some View {
-        TabView(selection: $selectedTab) { /* ... */ }
-            .onAppear { syncPresentation() }
-            .onChange(of: isSidebar) { _, sidebar in
-                if sidebar {
-                    // 横屏：关掉所有弹窗，内容进副屏
-                    showDetailSheet = false
-                    showDetailFullScreen = false
+        NavigationStack {
+            VStack {
+                if isSidebar {
+                    // 横屏：Button 触发 detailSelection → 副屏渲染
+                    Button { detailSelection = .divinationResult(...) } label: { ... }
                 } else {
-                    syncPresentation()
+                    // 竖屏：NavigationLink 推入，TabBar 保留
+                    NavigationLink { 
+                        ResultSheet(...) 
+                    } label: { ... }
                 }
             }
-            .onChange(of: detailSelection) { _, sel in handleSelectionChange(sel) }
-            .onChange(of: showDetailSheet) { _, showing in
-                if !showing, !isSidebar, !isChainTransition { detailSelection = .none }
-            }
-            .onChange(of: showDetailFullScreen) { _, showing in
-                if !showing, !isSidebar { detailSelection = .none }
-            }
-            .sheet(isPresented: $showDetailSheet) {
-                SplitDetailPane(selection: $detailSelection)
-                    .presentationDetents([.medium, .large])
-            }
-            .fullScreenCover(isPresented: $showDetailFullScreen) {
-                SplitDetailPane(selection: $detailSelection, showCloseButton: false)
-            }
-    }
-
-    private func syncPresentation() {
-        guard !isSidebar else { return }
-        switch detailSelection.presentationMode {
-        case .sheet:      showDetailSheet = true
-        case .fullScreen: showDetailFullScreen = true
-        case .inline:     break
-        }
-    }
-
-    private func handleSelectionChange(_ sel: DetailSelection) {
-        if sel == .none {
-            showDetailSheet = false
-            showDetailFullScreen = false
-            return
-        }
-        guard !isSidebar else { return }
-        switch sel.presentationMode {
-        case .sheet:
-            chainPresent(toggle: &showDetailSheet)
-        case .fullScreen:
-            showDetailFullScreen = true
-        case .inline:
-            break
-        }
-    }
-
-    private func chainPresent(toggle: inout Bool) {
-        if toggle {
-            isChainTransition = true
-            toggle = false
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                isChainTransition = false
-                toggle = true
-            }
-        } else {
-            toggle = true
         }
     }
 }
 ```
 
-**旋转过渡核心逻辑：**
+**横屏时 NavigationLink 失效：**
 
-竖屏全屏 → 横屏：`showDetailFullScreen = false`，`SplitDetailPane` 直接在 HStack 副屏渲染同一内容。因为 `@StateObject` 挂在 `AdaptiveRootView`，状态跨越旋转不丢。
-
-竖屏 sheet → 横屏：同上，`showDetailSheet = false`，内容进副屏。
+`isSidebar == true` 时用 `Button` 替代 `NavigationLink`。Button 设 `detailSelection`，SplitDetailPane 在副屏渲染同一视图。这是 Skill 的 Pitfall 5 规则——"NavigationLink bypasses the sidebar"。
 
 **`detailSelection = .none` 统一关闭：**
 
-无论当前是 sheet 还是 fullScreen，设为 `.none` 都会触发各自的 dismiss gate 关掉弹窗，同时在横屏下清空副屏内容。
+竖屏 `.push` 页面通过 NavigationStack 的返回按钮退出（不需要设 `.none`）。竖屏 `.sheet` 页面通过下滑关闭或 dismiss gate 退出。横屏通过 sidebar 的 xmark 退出。三路径互不干扰。
+
+**`.push` 页面的旋转过渡：**
+
+竖屏 push 到横屏：NavigationStack 中的页面保留在当前 tab 堆栈中。同时 `detailSelection` 被设置，副屏渲染同一内容。用户会看到两个版本（推入页 + 副屏）——这是预期行为。如需单实例，可将 `@StateObject` 提升到 AdaptiveRootView，让两者共享数据源。
 
 ---
 
@@ -595,20 +491,20 @@ Starting a new iPad-adaptive app from scratch:
 enum PresentationMode {
     case inline
     case sheet
-    case fullScreen
+    case push
 }
 
 enum AppSelection: Equatable {
     case none
     case detail(Item)        // inline
     case settings             // sheet
-    case flow(FlowParams)    // fullScreen
+    case flow(FlowParams)    // push
 
     var presentationMode: PresentationMode {
         switch self {
         case .none, .detail: return .inline
         case .settings:      return .sheet
-        case .flow:          return .fullScreen
+        case .flow:          return .push
         }
     }
 }
@@ -884,29 +780,23 @@ grep -n "cancellationAction\|topBarLeading\|ToolbarItem" <file>.swift
 
 **口诀：Sheet 内不放取消按钮。关闭永远是外层 SplitDetailPane / morePane 的事。**
 
-### Pitfall 11: fullScreenCover 旋转后内容消失
+### Pitfall 11: `.push` 页面在横屏时出现在左侧 sidebar
 
-**Symptom:** 竖屏 fullScreenCover 正常显示，旋转到横屏后内容消失，副屏空白。
+**Symptom:** 竖屏时 NavigationLink push 正常，旋转到横屏后内容出现在左侧窄栏（35%）而不是右侧副屏。
 
-**Cause:** 只设置了 `showDetailFullScreen = false`，但没有在横屏 HStack 中渲染同一个 `DetailSelection` 的内容。fullScreenCover dismiss 后 `SplitDetailPane` 的条件渲染已经生效，但 `detailSelection` 仍指向同一 case — 所以内容应该自动出现在副屏。
+**Cause:** NavigationLink 推入目标在当前 tab 的 NavigationStack 内，NavigationStack 属于左侧 ContentView。横屏时 ContentView 被约束为 35% 宽度。
 
-**Fix — 检查两点：**
-1. `AdaptiveRootView` 的 `isLandscape` 计算是否正确（`windowSize.width >= windowSize.height`）
-2. `isSidebar` 切换到 `true` 时，`onChange(of: isSidebar)` 是否同时关了 sheet 和 fullScreen：
+**Fix — 在 tab 页面内条件渲染导航按钮：**
 ```swift
-.onChange(of: isSidebar) { _, sidebar in
-    if sidebar {
-        showDetailSheet = false       // 关 sheet
-        showDetailFullScreen = false  // 关 fullScreen
-        // detailSelection 不变 → SplitDetailPane 在副屏渲染同一内容
-    } else {
-        syncPresentation()
-    }
+if isSidebar {
+    // 横屏：Button → detailSelection → 右侧副屏
+    Button { detailSelection = .divinationResult(...) } label: { ... }
+} else {
+    // 竖屏：NavigationLink → 推入当前 tab 的 NavigationStack
+    NavigationLink { ResultSheet(...) } label: { ... }
 }
 ```
-3. 确保 `@StateObject` / 共享状态在 `AdaptiveRootView` 层持有，不是 SplitDetailPane 内部。
-
-**关键：** 竖屏 fullScreen → 横屏副屏的过渡是无缝的 —— fullScreen dismiss + HStack 出现同一 view。用户只看到内容从全屏「缩」到右半屏。
+横屏时隐藏 NavigationLink、显示 Button，让内容路由到右侧副屏。这是 Pitfall 5 的核心规则。
 
 ### Pitfall 9: Canvas flickers during window resize
 
@@ -965,7 +855,7 @@ SidebarButton(selection: $detailSelection, target: .myNewPage) {
 
 **新增页面时：**
 1. Add case to `DetailSelection` enum
-2. Set `presentationMode` — `.sheet`（表单/选择器）、`.fullScreen`（沉浸式结果/仪式）、`.inline`（轻量内容）
+2. Set `presentationMode` — `.push`（主内容页）、`.sheet`（表单/选择器）、`.inline`（轻量内容）
 3. Add `case .yourCase:` branch in `makeView(context:)` — same file
 4. Does the child view have its own `NavigationStack`?
    - **Yes** → Render directly, pass `context.showCloseButton` + onClose
@@ -974,8 +864,9 @@ SidebarButton(selection: $detailSelection, target: .myNewPage) {
 6. If the view used `@Binding var isPresented`, change to `var onDismiss: () -> Void`
 7. **Always** guard toolbar close buttons with `if context.showCloseButton { }`
 8. **Test at narrow width** — sidebar is ~360pt. Fixed-width rows overflow. Use `LazyVGrid`/`.frame(maxWidth: .infinity)`.
-9. Build, test both orientations with both presentation modes
-10. **No changes needed in SplitDetailPane.swift**
+9. **`.push` 页面在 tab 内实现 NavigationLink | Button 条件切换**（竖屏 push / 横屏 sidebar）
+10. Build, test both orientations
+11. **No changes needed in SplitDetailPane.swift**
 
 ## Related
 
