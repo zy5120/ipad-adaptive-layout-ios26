@@ -209,6 +209,30 @@ NavigationStack push 自带返回箭头。页面内**禁止**添加取消、完�
 
 排查命令：`grep -n "cancellationAction\|topBarLeading" <file>.swift`
 
+### 导航按钮用符号不用文字
+
+竖屏返回由 NavigationStack 自动提供。自定义按钮全部用 SF Symbol：
+
+| 操作 | 符号 | 位置 |
+|------|------|------|
+| 取消/关闭（横屏副屏） | `xmark` | `.cancellationAction`，仅横屏显示 |
+| 保存/确认 | `checkmark` | `.confirmationAction` |
+| 新增 | `plus` | `.primaryAction` |
+
+禁止使用文字按钮（"取消""完成""保存"）。
+
+```swift
+// ✅ 正确
+ToolbarItem(placement: .confirmationAction) {
+    Button { save() } label: { Image(systemName: "checkmark") }
+}
+
+// ❌ 错误——文字按钮
+ToolbarItem(placement: .confirmationAction) {
+    Button("保存") { save() }
+}
+```
+
 ---
 
 ## 相关
