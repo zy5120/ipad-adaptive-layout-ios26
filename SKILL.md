@@ -1,7 +1,6 @@
 ---
 name: 小鱼平板适配forOS26
-version: "1.0.0"
-description: "iPad adaptive dual-mode layout — Sheet or NavigationStack push in portrait, sidebar in landscape. Switch modes per-page via a single config flag. Two rendering paths isolated; no page code changes needed when switching."
+description: "iPad 自适应双模式布局：竖屏用 Sheet 或 NavigationStack push，横屏用侧栏副屏；每个页面通过单个配置标志切换模式，两套渲染路径隔离、页面业务代码零改动。适用于：要求 iPad 竖屏/横屏自适应布局、旋转时状态不丢失、双模式（sheet/全屏）切换、保持 iPhone 与 iPad 界面一致。iPad adaptive dual-mode layout — Sheet or NavigationStack push in portrait, sidebar in landscape; switch modes per page via a single config flag; two rendering paths isolated; rotation-safe, no page code changes needed."
 ---
 
 ## 版本
@@ -72,6 +71,19 @@ enum DetailSelection: Equatable {
     }
 }
 ```
+
+### 如何选择展示模式
+
+| 场景 | 用 sheet | 用 fullScreen |
+|---|---|---|
+| 轻量选择器 / 快捷输入（Picker、快速弹层） | ✅ | ❌ |
+| 主内容 / 长文阅读（结果、文档、详情） | ❌ | ✅ |
+| 竖屏时需要返回上一级 | ❌ | ✅（NavigationStack 自动返回箭头） |
+| 横屏时希望副屏可关闭 | 两者均可（副屏接管） | 两者均可 |
+| 临时弹层、随手关闭 | ✅ | ❌ |
+| 需要保留页面状态、旋转不丢 | 均可（状态在根视图） | 均可（状态在根视图） |
+
+无法确定时：把候选模式与页面列给开发者选择，不要擅自决定。
 
 ---
 
@@ -154,6 +166,16 @@ struct HistoryPage: View {
 3. 对应 Tab 内加 `@State pushState` + `navigationDestination` + 3 个 `onChange`
 
 不用动 ContentView、AdaptiveRootView、任何业务页面代码。
+
+### 新页面接入检查清单
+
+- [ ] `DetailSelection` 加 case，`displayMode` 按决策表返回 `.sheet` 或 `.fullScreen`
+- [ ] `SplitDetailPane.makeView()` 已加渲染分支（横屏副屏需要）
+- [ ] 对应 Tab 已注册 push 状态 + 3 个 `onChange`（fullScreen）；sheet 路径无需
+- [ ] 页面内容宽度自适应（`.frame(maxWidth: .infinity)` / `LazyVGrid` / 横向滚动），副屏 ~35% 宽度不溢出
+- [ ] fullScreen 模式无多余导航按钮（`grep -n "cancellationAction\|topBarLeading" <file>.swift` 为空）
+- [ ] 横屏副屏内子页面用 `detailSelection` 路由而非 push
+- [ ] 副屏 `xmark` 关闭时同时 `selection = .none`
 
 ---
 
@@ -309,5 +331,6 @@ if showCloseButton {
 ## 相关
 
 - [Apple HIG: Layout for iPad](https://developer.apple.com/design/human-interface-guidelines/layout)
-- 鱼律项目 NavigationStack push 参考: `/Users/yuu/Documents/yulawyer/鱼律/鱼律/Cases/CasesListView.swift`
+- NavigationStack push 的返回箭头与 toolbar 去重：遵循系统默认行为即可，无需额外文件
 - 开源仓库: https://github.com/zy5120/ipad-adaptive-layout-ios26
+- 相关技能：iOS 26 精美 TabView 改造（长条按钮 + 底部搜索）→ `xiaoyu-tabview`（~/.codex/skills/xiaoyu-tabview）

@@ -1,0 +1,4 @@
+interface:
+  display_name: "小鱼平板适配forOS26"
+  short_description: "iPad 自适应双模式布局：竖屏 Sheet/推入、横屏侧栏副屏，单标志切换、旋转不丢状态"
+  default_prompt: "用小鱼平板适配让 iPad 竖屏/横屏自适应布局，旋转时状态不丢失"
