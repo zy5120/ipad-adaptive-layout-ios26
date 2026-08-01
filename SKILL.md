@@ -210,6 +210,8 @@ private var isLandscape: Bool {
 // 宽≈屏幕宽 且 高骤降 >200pt → 维持原值（键盘干扰）
 ```
 
+**踩坑：方向判断不要用初始为 0 的尺寸**。若 `windowSize` 初始为 `.zero`，`0 >= 0` 会被判成横屏；启动时若首个几何事件恰好是键盘弹出尺寸（被过滤），真实尺寸一直没记录，App 会误以为横屏（竖屏点搜索也会出副屏）。修法：尺寸未知时默认竖屏——`isLandscape = windowSize != .zero && windowSize.width >= windowSize.height`；或直接使用 `UIScreen.main.bounds`（六壬/塔罗做法，无此问题）。
+
 ---
 
 ## 旋转同步速查
