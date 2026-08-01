@@ -7,6 +7,10 @@ description: "iPad 自适应双模式布局：竖屏用 Sheet 或 NavigationStac
 
 v1.0.0 — 双模式方案（Sheet / FullScreen）完整版。两套底层实现完全隔离，页面仅改标识即可切换。
 
+## 铁律：横屏副屏不限制设备
+
+横屏副屏对 iPhone 与 iPad 一视同仁：`showSidebar = isLandscape`，**不要**用 `userInterfaceIdiom == .pad` 把 iPhone 排除——否则 iPhone 横屏只会主屏拉伸、不出副屏（实测踩坑）。iPhone 横屏出副屏是用户认可的效果（与 iPad 一致）。
+
 ---
 
 ## 核心架构
