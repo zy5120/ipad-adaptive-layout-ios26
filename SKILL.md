@@ -326,6 +326,14 @@ if showCloseButton {
 }
 ```
 
+## 相关
+
+## 带精美 TabView 的 App（横屏副屏联动）
+
+目标 App 已有“精美 TabView”（独立搜索标签 + 底部长条按钮 + 底部搜索）时，直接套用 35% 左栏方案会让控件与副屏“分家”：搜索、长条按钮要**按焦点跟随主屏或副屏**，副屏内容切换要**强制重建**（否则显示旧内容）。完整要点见 [references/tabview-apps.md](references/tabview-apps.md)。
+
+> 当前范围：只适配了 `.fullScreen`（详情类）页面；`.sheet`（轻量弹层类）页面尚未适配。
+
 ---
 
 ## 相关
