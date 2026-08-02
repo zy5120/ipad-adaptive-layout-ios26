@@ -5,7 +5,8 @@ description: "iPad 自适应双模式布局：竖屏用 Sheet 或 NavigationStac
 
 ## 版本
 
-v1.0.0 — 双模式方案（Sheet / FullScreen）完整版。两套底层实现完全隔离，页面仅改标识即可切换。
+v1.1.0 — 双模式方案（Sheet / FullScreen）完整版。两套底层实现完全隔离，页面仅改标识即可切换。
+新增「三大反复出现的坑」实战总结：旋转残留重复页面、sheet↔push 不同步、旋转丢输入，以及键盘压缩误判方向的防护规则。
 
 ## 铁律：横屏副屏不限制设备
 
@@ -335,6 +336,83 @@ if showCloseButton {
     pushedCard = card  // 竖屏 push
 }
 ```
+
+## 三大反复出现的坑（鱼律实战总结，务必先读）
+
+以下三个问题在多个页面反复出现，根因都是「局部状态 + 条件呈现器 + 旋转重建」的组合。任何新页面接入双模式前，先对照本清单自查。
+
+### 坑 1：横屏后左屏残留右屏的页面（重复页面）
+
+**现象**：横屏时左屏也出现了右屏的页面（如搜索公司、参与人编辑）。
+
+**根因**：页面 A 被推入左屏栈后，A 内部再用 `navigationDestination(item:)/(isPresented:)` 推入子页 B（B 的打开状态是 A 的局部 @State）。旋转到横屏时外层 push（`pushedDetail`）被 pop，但**内层 item 推入可能残留在旧栈**；随后 B 的呈现状态再次为 true 时，会在旧容器里再推一份 → 左屏出现重复页面（日志特征：一次打开出现两个 `CompanySearchView 出现`，一个 `presentedAsSheet=false` 一个 `=true`）。
+
+**铁律**：
+- 旋转时显式清掉旧容器里的嵌套推入：在页面 `onChange(of: pad.isSidebar)` 里把子页 item 置 nil（pop 旧栈），新容器再按全局会话恢复。
+- 子页的「打开状态」必须放全局（如 `pad.companySearchOpen`），旋转后新容器 `onAppear` 时按当前方向重建呈现。
+- 关闭回调（`onChange(item → nil)`）**不要**顺手清全局会话；由子页自身 `onDisappear` 判断「用户关闭 vs 旋转重建」：
+  - 旋转：`onChange(of: pad.isSidebar)` 里置 `wasRotated = true`，`onDisappear` 只存档、不清会话；
+  - 用户关闭：`onDisappear` 时清空全局会话（打开状态 + 草稿）。
+
+### 坑 2：横竖屏切换页面不同步（sheet ↔ push 不转换）
+
+**现象**：竖屏 sheet 打开，转横屏后没有变成右屏推入；或反过来，横屏推入转竖屏没有变成 sheet。
+
+**根因**：条件呈现器 `if pad.isSidebar { navigationDestination(...) } else { sheet(...) }` 在同一绑定上切换，SwiftUI 不会自动把旧呈现转成新呈现——旧的被拆掉后，新的不会自动出现（旋转时页面重建，局部 `isPresented` 状态归零）。
+
+**铁律**：
+- 条件呈现器的「打开状态」放全局；旋转后重建的页面 `onAppear` 读取全局状态重新呈现（此时 presenter 已按新方向渲染）。
+- 旋转瞬间（`onChange(of: pad.isSidebar)`）先置 `shown = false` 拆掉旧呈现，避免新旧并存/残留。
+
+### 坑 3：旋转丢输入（临时书写记录不保存）
+
+**现象**：表单输入后旋转，内容丢失（新建/编辑案件、刑事新建、AI 配置、参与人、搜索公司都中过招）。
+
+**根因**：字段全是视图内 `@State`；旋转导致视图重建（竖屏 push ↔ 横屏副屏切换）→ `@State` 归零。
+
+**铁律（表单草稿全局化）**：
+- 打开时把会话/草稿写入全局状态（pad）。
+- `onChange(of: pad.isSidebar)` 与 `onDisappear` **双点存档**（旋转瞬间立即存，不依赖消失回调先后）。
+- 新实例 `onAppear` 恢复；再加「草稿版本号」兜底：每次存档 version+1，新实例 `onChange(of: version)` 恢复（解决“旧实例消失晚于新实例出现”的竞态）。
+- 保存/用户关闭时显式清空草稿（避免下次打开恢复旧内容）。
+
+### 方向判断：键盘压缩误判横屏（宽度变化原则）
+
+**现象**：窄竖屏（iPad mini 744×1133）+ 键盘弹出 → 可视高度被压到 < 宽度（744×720）→ 误判横屏 → 双模式呈现器当场切换 → 弹层被拆掉（“页面崩了”）、或闪现分栏。
+
+**根因**：`isLandscape = width >= height` 只看宽高比；键盘只压缩高度。
+
+**铁律**：
+- 键盘期间只接受「宽度明显变化（>40pt）且宽高比翻转」的尺寸（真旋转会改变宽度）。
+- **该判断必须无条件生效，不能依赖键盘通知先后**：几何事件可能先于 `keyboardWillShow` 到达（竞态），所以「宽度没变、高度压缩 >60pt」直接拒绝，不看 `keyboardVisible`。
+- 真旋转（宽度变化）正常接受；键盘收起恢复高度正常接受（高度变大不拦截）。
+
+```swift
+.onGeometryChange(for: CGSize.self, of: { $0.size }) { newSize in
+    guard newSize.width > 0, newSize.height > 0 else { return }
+    // 无条件：宽度没变、高度明显压缩 → 键盘压缩（即使键盘通知还没到也忽略）
+    if windowSize != .zero,
+       abs(newSize.width - windowSize.width) <= 40,
+       newSize.height < windowSize.height - 60 { return }
+    // 键盘期间：仅接受宽度明显变化且宽高比翻转（真旋转）
+    if keyboardVisible || Date().timeIntervalSince(keyboardChangeAt) < 0.6 {
+        guard windowSize == .zero
+            || (abs(newSize.width - windowSize.width) > 40
+                && (windowSize.width >= windowSize.height)
+                   != (newSize.width >= newSize.height))
+        else { return }
+    }
+    windowSize = newSize
+}
+```
+
+### 嵌套推入的旋转清理清单（接入新页面时逐条核对）
+
+旋转到横屏时，检查旧容器（左屏栈）里是否有 `navigationDestination(item:)/(isPresented:)` 驱动的嵌套推入：
+1. 外层 `pushedDetail` 由 DetailSelectionLink 自动 pop；
+2. 内层 item 推入：在页面的 `onChange(of: pad.isSidebar)` 里显式置 nil（pop 旧栈）；
+3. 全局会话（打开状态 + 草稿）由新容器 `onAppear` 恢复，按当前方向重建（竖屏 sheet、横屏右屏推入）；
+4. 所有「打开状态」和「表单草稿」统一放全局，页面内不留决定性状态。
 
 ## 相关
 
