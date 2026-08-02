@@ -416,6 +416,70 @@ if showCloseButton {
 3. 全局会话（打开状态 + 草稿）由新容器 `onAppear` 恢复，按当前方向重建（竖屏 sheet、横屏右屏推入）；
 4. 所有「打开状态」和「表单草稿」统一放全局，页面内不留决定性状态。
 
+### 第三方输入法回车丢字（iOS 26 SwiftUI TextField）
+
+**现象**：第三方拼音输入法在普通 SwiftUI `TextField` 里打字，文字显示在框内，但按回车/换行后组合文本被清空、值未提交（用户以为输入了，实际没记录，必须再按空格）。仅中文文本键盘出现；数字/号码键盘正常。
+
+**根因**：iOS 26 的 SwiftUI `TextField` 走新文本输入系统，第三方键盘的拼音「组合文本（marked text）」被实时写进值绑定（日志：值 a → ce → ce s，替换而非追加），回车时组合文本被丢弃而非提交。**能正常工作的输入框**：`TextEditor`（UITextView 底层）、`.searchable`（UISearchTextField）、数字键盘——都是 UIKit 原生输入路径。
+
+**铁律**：涉及中文/文本输入的普通 `TextField`，一律替换为 `CommitSafeTextField`（基于 UITextField 的 UIViewRepresentable）：
+- 组合文本未提交时不同步进值（避免拼音半成品）；
+- 回车/失焦时先 `unmarkText()` 强制提交组合文本，再写回绑定；
+- 已实测修复（参与人表单姓名/公司名称：打字→回车，值完整提交）。
+
+```swift
+struct CommitSafeTextField: UIViewRepresentable {
+    @Binding var text: String
+    var placeholder = ""
+    var keyboardType: UIKeyboardType = .default
+    var returnKeyType: UIReturnKeyType = .default
+    var textAlignment: NSTextAlignment = .natural
+    var isSecure = false
+    var onCommit: (() -> Void)? = nil
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeUIView(context: Context) -> UITextField {
+        let tf = UITextField()
+        tf.delegate = context.coordinator
+        tf.addTarget(context.coordinator, action: #selector(Coordinator.textChanged(_:)), for: .editingChanged)
+        return tf
+    }
+
+    func updateUIView(_ tf: UITextField, context: Context) {
+        if tf.text != text { tf.text = text }
+        tf.placeholder = placeholder
+        tf.keyboardType = keyboardType
+        tf.returnKeyType = returnKeyType
+        tf.textAlignment = textAlignment
+        tf.isSecureTextEntry = isSecure
+        tf.font = .preferredFont(forTextStyle: .body)
+        tf.textColor = .label
+        tf.setContentHuggingPriority(.defaultLow, for: .horizontal)
+    }
+
+    class Coordinator: NSObject, UITextFieldDelegate {
+        var parent: CommitSafeTextField
+        init(_ p: CommitSafeTextField) { parent = p }
+
+        @objc func textChanged(_ tf: UITextField) {
+            if tf.markedTextRange == nil { parent.text = tf.text ?? "" }
+        }
+
+        func textFieldShouldReturn(_ tf: UITextField) -> Bool {
+            commitMarkedText(tf); parent.onCommit?(); return true
+        }
+
+        func textFieldDidEndEditing(_ tf: UITextField) { commitMarkedText(tf) }
+
+        private func commitMarkedText(_ tf: UITextField) {
+            if tf.markedTextRange != nil { tf.unmarkText() }
+            parent.text = tf.text ?? ""
+        }
+    }
+}
+```
+
 ## 相关
 
 ## 带精美 TabView 的 App（横屏副屏联动）
