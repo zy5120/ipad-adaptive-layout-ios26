@@ -242,6 +242,12 @@ NavigationStack push 自带返回箭头。页面内**禁止**添加取消、完�
 
 排查命令：`grep -n "cancellationAction\|topBarLeading" <file>.swift`
 
+### 推入页内禁止再套 NavigationStack（嵌套栈）
+
+被 push 的页面（竖屏全屏）**绝不能**自带 `NavigationStack`——嵌套栈会让 `dismiss()`/左滑返回行为不可靠（返回错位、左上角出现双返回按钮）。正确写法：仅当该页以 sheet 呈现时才包 `NavigationStack`，push 模式下直接渲染内容（导航栏由外层承担）。实测：鱼律时间线节点/待办/案件节点表单因此“保存后返回错乱”，改为条件包栈后恢复正常。
+
+边界说明（与 `xiaoyu-tabview` 技能一致）：**表单类**页面必须彻底不套栈（否则保存/dismiss 错乱）；**查看/详情类**钻取页（云同步诊断、隐私政策、编辑个人信息等）如因历史遗留保留自身栈，必须保证不添加任何左上角按钮（返回由外层导航提供），否则出现双返回按钮。
+
 ### 竖屏全屏时导航栏按钮去重
 
 NavigationStack 自带返回箭头。若页面 toolbar 内出现功能重复的图标（如既有 `<` 又有 `xmark`），只保留一个。原则：
@@ -490,13 +496,9 @@ struct CommitSafeTextField: UIViewRepresentable {
 }
 ```
 
-## 相关
-
 ## 带精美 TabView 的 App（横屏副屏联动）
 
 目标 App 已有“精美 TabView”（独立搜索标签 + 底部长条按钮 + 底部搜索）时，直接套用 35% 左栏方案会让控件与副屏“分家”：搜索、长条按钮要**按焦点跟随主屏或副屏**，副屏内容切换要**强制重建**（否则显示旧内容）。完整要点见 [references/tabview-apps.md](references/tabview-apps.md)。
-
-> 当前范围：只适配了 `.fullScreen`（详情类）页面；`.sheet`（轻量弹层类）页面尚未适配。
 
 ---
 
