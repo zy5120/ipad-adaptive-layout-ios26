@@ -1,46 +1,23 @@
-# iPad Adaptive Layout: HStack + Conditional Pane
+# 小鱼平板适配forOS26（iPad Adaptive Layout）
 
-> ⭐ **If this saved you time, please [star](https://github.com/zy5120/ipad-adaptive-layout-ios26) and [fork](https://github.com/zy5120/ipad-adaptive-layout-ios26) the repo!**
+用可预测的 `HStack` 双栏结构取代 `NavigationSplitView` 的 iOS 26+ 自适应布局方案：竖屏 sheet / NavigationStack push，横屏右侧副屏；旋转不丢状态、不受 UIKit 尺寸类别干扰。
 
-A reusable SwiftUI pattern that replaces `NavigationSplitView` with a predictable `HStack`-based adaptive layout. Designed for iOS 26+ apps that need portrait-sheet / landscape-sidebar behavior without UIKit size class interference or rotation-induced state loss.
+> 本技能来自「小鱼塔罗 / zhu.yu.tarot」iOS App（iOS 26+）实测沉淀（横竖屏数千次旋转验证），并被「鱼律 / yulawyer」等 App 使用。
 
-## What It Solves
+## 解决的问题
 
-- **Rotation survival:** `@StateObject` and `@State` survive orientation changes because views never leave the hierarchy.
-- **Predictable layout:** Detects landscape via `windowSize.width >= windowSize.height` instead of unreliable `horizontalSizeClass`.
-- **Clean sheet handling:** Sheets only fire in portrait. In landscape, the same view renders inline with a close button.
-- **No UIKit interference:** Forces `.horizontalSizeClass = .compact` on the sidebar to prevent UIKit split-view gestures.
+- **旋转存活**：视图不离开层级，`@State` / `@StateObject` 在横竖屏切换后不丢失。
+- **方向判断可靠**：用 `windowSize.width >= windowSize.height` 判断横竖屏，不用不可靠的 `horizontalSizeClass`。
+- **干净的 sheet 处理**：仅竖屏弹出 sheet；横屏同一视图以内嵌方式呈现并带关闭按钮。
+- **无 UIKit 干扰**：副屏强制 `.horizontalSizeClass = .compact`，避免 UIKit 分屏手势冲突。
 
-## Architecture
+## 架构
 
 ```
 AdaptiveRootView (HStack)
-  |-- ContentView (always present, TabView)
-  |-- [landscape only] Divider + SplitDetailPane
+  |-- ContentView (常驻，TabView)
+  |-- [仅横屏] Divider + SplitDetailPane
 ```
-
-## Key Patterns
-
-| Pattern | File |
-|---------|------|
-| Root layout with HStack + conditional pane | `AdaptiveRootView` in SKILL.md |
-| Selection enum with `needsSheet` computed property | `DetailSelection` in SKILL.md |
-| Sheet orchestrator with rotation guards | `ContentView` in SKILL.md |
-| Dual-mode detail pane (sheet vs inline) | `SplitDetailPane` in SKILL.md |
-| Floating close button (xmark + Circle + ultraThinMaterial) | `closeButton` in SKILL.md |
-| Sheet vs overlay switching for sub-prompts | `rightAlignSheet` in SKILL.md |
-| ObservableObject hoisting for rotation survival | Rotation Survival section in SKILL.md |
-
-## When to Use
-
-- Building an iPad-adaptive iOS 26+ app with a sidebar layout
-- `NavigationSplitView` is causing state resets or sheet conflicts
-- You need sub-prompts (sheets on sheets) that work correctly in both orientations
-- You have long-lived state (AI streaming, form progress) that must survive rotation
-
-## Source
-
-Extracted from the 小鱼塔罗 iOS app (zhu.yu.tarot, iOS 26+), where this pattern was proven across thousands of rotation cycles on physical iPad hardware.
 
 ## 配套使用（与 小鱼 TabView 相互配合）
 
@@ -61,5 +38,50 @@ Extracted from the 小鱼塔罗 iOS app (zhu.yu.tarot, iOS 26+), where this patt
 - 作者：zy5120（小鱼塔罗 / 鱼律 等 iOS App）
 
 在派生产物（文档、代码、技能文件）中请包含以上署名与许可证文本。
+
+Copyright © 2026 zy5120
+
+---
+
+# 小鱼平板适配forOS26 (iPad Adaptive Layout) — English
+
+A reusable SwiftUI pattern that replaces `NavigationSplitView` with a predictable `HStack`-based adaptive layout. Designed for iOS 26+ apps that need portrait-sheet / landscape-sidebar behavior without UIKit size class interference or rotation-induced state loss.
+
+> Extracted from the "小鱼塔罗 / zhu.yu.tarot" iOS app (iOS 26+), proven across thousands of rotation cycles on physical iPad hardware; also used by "鱼律 / yulawyer" and other apps.
+
+## What It Solves
+
+- **Rotation survival:** `@StateObject` and `@State` survive orientation changes because views never leave the hierarchy.
+- **Predictable layout:** Detects landscape via `windowSize.width >= windowSize.height` instead of unreliable `horizontalSizeClass`.
+- **Clean sheet handling:** Sheets only fire in portrait. In landscape, the same view renders inline with a close button.
+- **No UIKit interference:** Forces `.horizontalSizeClass = .compact` on the sidebar to prevent UIKit split-view gestures.
+
+## Architecture
+
+```
+AdaptiveRootView (HStack)
+  |-- ContentView (always present, TabView)
+  |-- [landscape only] Divider + SplitDetailPane
+```
+
+## Companion Skill
+
+This skill works **together with [xiaoyu-tabview (小鱼 TabView)](https://github.com/zy5120/xiaoyu-tabview)** (iOS 26 beautiful tab bar: bottom long action button + bottom search):
+
+1. First adapt each page's dual-mode layout with this skill (portrait sheet/push, landscape sidebar, rotation-safe state);
+2. Then adapt the beautiful TabView's bottom action button and search with `xiaoyu-tabview` (button follows focus, search moves to the sidebar, non-searchable pages do nothing on search tap).
+
+Each skill owns one layer. Follow this order when adapting any page.
+
+## License
+
+This project is licensed under the **Apache License 2.0**.
+
+**Attribution required**: any use, invocation, copy, or adaptation of this skill (including using it as development guidelines, generating code/content, or integrating it into other skills/projects) must retain this copyright notice and credit the source:
+
+- Repository: <https://github.com/zy5120/ipad-adaptive-layout-ios26>
+- Author: zy5120 (小鱼塔罗 / 鱼律 iOS apps)
+
+Please include the attribution and the license text in derived works (docs, code, skill files).
 
 Copyright © 2026 zy5120
