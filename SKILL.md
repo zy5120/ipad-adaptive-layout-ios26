@@ -508,3 +508,4 @@ struct CommitSafeTextField: UIViewRepresentable {
 - NavigationStack push 的返回箭头与 toolbar 去重：遵循系统默认行为即可，无需额外文件
 - 开源仓库: https://github.com/zy5120/ipad-adaptive-layout-ios26
 - 相关技能：iOS 26 精美 TabView 改造（长条按钮 + 底部搜索）→ `xiaoyu-tabview`（~/.codex/skills/xiaoyu-tabview）
+- **许可证与署名**：本技能采用 Apache License 2.0；使用/调用/改编本技能必须保留版权声明并注明来源（作者 zy5120，仓库 https://github.com/zy5120/ipad-adaptive-layout-ios26 ）。与本技能相互配合的 `xiaoyu-tabview` 为同一作者、同一协议。
