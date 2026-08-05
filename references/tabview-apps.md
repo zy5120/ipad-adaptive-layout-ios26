@@ -15,7 +15,7 @@
 ## 要点
 
 1. **焦点概念**：共享状态加 `focusedPane`（main / sidebar）。主屏内容区触摸/滚动 → main；打开详情 → sidebar。
-2. **焦点手势**：用 `DragGesture(minimumDistance: 0).onChanged`（`onEnded` 会被滚动吞掉，不灵敏）；只挂在内容区，不挂标签栏（否则点搜索按钮会把焦点抢回主屏）。
+2. **焦点手势**：用 `DragGesture(minimumDistance: 4).onChanged` 且仅在值变化时赋值（`if pad.focusedPane != .main { pad.focusedPane = .main }`）。**不要用 `minimumDistance: 0`**——按下瞬间触发状态变更会把整页点击（列表行 + 系统返回按钮）取消掉（iOS 26 / iPadOS 27 / Mac 实测）；只挂在内容区，不挂标签栏（否则点搜索按钮会把焦点抢回主屏）。
 3. **长条按钮**（tabViewBottomAccessory）：横屏且焦点在副屏、副屏有详情对象 → 显示该对象的主操作（编辑 / 添加子项 / 关联等）；否则显示主屏当前页按钮。打开详情时显式置 `focusedPane = .sidebar`。
 4. **搜索**：横屏点搜索 → 搜索改在右侧副屏呈现（左侧保持当前主标签）。焦点在副屏详情 → 按详情当前子标签搜该对象内容；否则搜主屏当前页。搜索界面用系统原生 `.searchable`（Liquid Glass，自带灵动动画）；切换主标签时退出搜索。
 5. **搜索结果联动**：点搜索结果 → 关闭搜索并把详情同步到全局状态（旋转不丢）。
